@@ -19,14 +19,12 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
 
-    - name: Create Missing Files (.env & google-services.json)
+    - name: Create Missing Files (.env & Correct google-services.json)
       run: |
         touch .env.example
         touch .env
         mkdir -p app
-        if [ ! -f "app/google-services.json" ]; then
-          echo '{"project_info":{"project_number":"0","project_id":"dummy","storage_bucket":"dummy.appspot.com"},"client":[{"client_info":{"mobilesdk_app_id":"1:0:android:0","android_client_info":{"package_name":"com.example.app"}},"api_key":[{"current_key":"dummy"}]}]}' > app/google-services.json
-        fi
+        echo '{"project_info":{"project_number":"0","project_id":"dummy","storage_bucket":"dummy.appspot.com"},"client":[{"client_info":{"mobilesdk_app_id":"1:0:android:0","android_client_info":{"package_name":"com.aistudio.vistaraedit.vpro"}},"api_key":[{"current_key":"dummy"}]}]}' > app/google-services.json
 
     - name: Generate Debug Keystore
       run: |

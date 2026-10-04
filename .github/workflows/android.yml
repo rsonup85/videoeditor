@@ -19,10 +19,18 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
 
-    - name: Create Missing Environment Files
+    - name: Create Missing Files (.env & google-services.json)
       run: |
         touch .env.example
         touch .env
+        mkdir -p app
+        if [ ! -f "app/google-services.json" ]; then
+          echo '{"project_info":{"project_number":"0","project_id":"dummy","storage_bucket":"dummy.appspot.com"},"client":[{"client_info":{"mobilesdk_app_id":"1:0:android:0","android_client_info":{"package_name":"com.example.app"}},"api_key":[{"current_key":"dummy"}]}]}' > app/google-services.json
+        fi
+
+    - name: Generate Debug Keystore
+      run: |
+        keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
 
     - name: Setup Gradle
       uses: gradle/actions/setup-gradle@v3

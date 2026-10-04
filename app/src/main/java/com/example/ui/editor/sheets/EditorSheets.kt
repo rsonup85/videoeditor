@@ -1,6 +1,5 @@
 package com.example.ui.editor.sheets
 
-import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -16,15 +15,21 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Flip
+import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.RotateRight
-import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.VolumeMute
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -52,11 +57,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.domain.model.CanvasAspectRatio
 import com.example.domain.model.ClipTransform
+import com.example.domain.model.EditorFont
 import com.example.domain.model.TextLayerProperties
 import com.example.domain.model.TransitionConfig
 import com.example.domain.model.TransitionType
@@ -68,6 +76,7 @@ import com.example.ui.theme.VistaraSecondary
 import com.example.ui.theme.VistaraTextMuted
 import com.example.ui.theme.VistaraTextPrimary
 import com.example.ui.theme.VistaraTextSecondary
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -77,6 +86,7 @@ fun SpeedSheet(
     onDismiss: () -> Unit
 ) {
     var speed by remember { mutableFloatStateOf(currentSpeed) }
+    var manualInput by remember { mutableStateOf(String.format(Locale.US, "%.2f", currentSpeed)) }
     val presets = listOf(0.25f, 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
 
     ModalBottomSheet(
@@ -96,42 +106,54 @@ fun SpeedSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Clip Speed",
+                    text = "Clip Speed (0.1x – 10.0x)",
                     color = VistaraTextPrimary,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold
                 )
-                Text(
-                    text = "${String.format("%.2f", speed)}x",
-                    color = VistaraSecondary,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
-                )
+
+                // Current Speed Badge
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = VistaraSecondary.copy(alpha = 0.2f)
+                ) {
+                    Text(
+                        text = "${String.format(Locale.US, "%.2f", speed)}x",
+                        color = VistaraSecondary,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Presets
+            // Presets Row
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 items(presets) { p ->
-                    val isSelected = (speed - p) in -0.05f..0.05f
+                    val isSelected = (speed - p) in -0.04f..0.04f
                     Surface(
-                        onClick = { speed = p },
-                        shape = RoundedCornerShape(12.dp),
+                        onClick = {
+                            speed = p
+                            manualInput = String.format(Locale.US, "%.2f", p)
+                            onApplySpeed(p)
+                        },
+                        shape = RoundedCornerShape(10.dp),
                         color = if (isSelected) VistaraSecondary else VistaraDarkSurfaceHighlight,
-                        modifier = Modifier.height(36.dp)
+                        modifier = Modifier.height(34.dp)
                     ) {
                         Box(
                             contentAlignment = Alignment.Center,
-                            modifier = Modifier.padding(horizontal = 14.dp)
+                            modifier = Modifier.padding(horizontal = 12.dp)
                         ) {
                             Text(
                                 text = "${p}x",
                                 color = if (isSelected) Color.Black else VistaraTextPrimary,
-                                fontSize = 13.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
                         }
@@ -139,19 +161,81 @@ fun SpeedSheet(
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
+            // Manual Slider with range 0.1x to 5.0x (and up to 10.0x via input)
             Slider(
-                value = speed,
-                onValueChange = { speed = it },
-                valueRange = 0.25f..2.5f,
+                value = speed.coerceIn(0.1f, 5.0f),
+                onValueChange = {
+                    speed = it
+                    manualInput = String.format(Locale.US, "%.2f", it)
+                    onApplySpeed(it)
+                },
+                valueRange = 0.1f..5.0f,
                 colors = SliderDefaults.colors(
                     thumbColor = VistaraSecondary,
                     activeTrackColor = VistaraSecondary
                 )
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Manual Stepper Controls (- / +) and Direct Input
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(VistaraDarkSurfaceHighlight, RoundedCornerShape(12.dp))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = {
+                        val newSpeed = (speed - 0.1f).coerceAtLeast(0.1f)
+                        speed = newSpeed
+                        manualInput = String.format(Locale.US, "%.2f", newSpeed)
+                        onApplySpeed(newSpeed)
+                    }
+                ) {
+                    Icon(imageVector = Icons.Default.Remove, contentDescription = "Decrease Speed", tint = VistaraSecondary)
+                }
+
+                // Direct Numerical Input Field
+                OutlinedTextField(
+                    value = manualInput,
+                    onValueChange = { input ->
+                        manualInput = input
+                        val parsed = input.toFloatOrNull()
+                        if (parsed != null && parsed in 0.1f..10.0f) {
+                            speed = parsed
+                            onApplySpeed(parsed)
+                        }
+                    },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = VistaraSecondary,
+                        unfocusedBorderColor = VistaraDarkSurfaceBorder,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.width(100.dp)
+                )
+
+                IconButton(
+                    onClick = {
+                        val newSpeed = (speed + 0.1f).coerceAtMost(10.0f)
+                        speed = newSpeed
+                        manualInput = String.format(Locale.US, "%.2f", newSpeed)
+                        onApplySpeed(newSpeed)
+                    }
+                ) {
+                    Icon(imageVector = Icons.Default.Add, contentDescription = "Increase Speed", tint = VistaraSecondary)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
 
             Button(
                 onClick = {
@@ -165,10 +249,10 @@ fun SpeedSheet(
                     .height(48.dp)
                     .testTag("apply_speed_button")
             ) {
-                Text("Apply Speed", fontWeight = FontWeight.Bold, color = Color.White)
+                Text("Done", fontWeight = FontWeight.Bold, color = Color.White)
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }
@@ -202,7 +286,7 @@ fun VolumeSheet(
                 fontWeight = FontWeight.Bold
             )
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Mute Switch Row
             Row(
@@ -230,7 +314,10 @@ fun VolumeSheet(
 
                 Switch(
                     checked = !muted,
-                    onCheckedChange = { muted = !it },
+                    onCheckedChange = {
+                        muted = !it
+                        onApplyVolume(volume, muted)
+                    },
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = VistaraSecondary,
                         checkedTrackColor = VistaraSecondary.copy(alpha = 0.4f)
@@ -238,7 +325,7 @@ fun VolumeSheet(
                 )
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
             if (!muted) {
                 Row(
@@ -255,7 +342,10 @@ fun VolumeSheet(
 
                 Slider(
                     value = volume,
-                    onValueChange = { volume = it },
+                    onValueChange = {
+                        volume = it
+                        onApplyVolume(it, muted)
+                    },
                     valueRange = 0f..2.0f,
                     colors = SliderDefaults.colors(
                         thumbColor = VistaraSecondary,
@@ -264,13 +354,10 @@ fun VolumeSheet(
                 )
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
             Button(
-                onClick = {
-                    onApplyVolume(volume, muted)
-                    onDismiss()
-                },
+                onClick = onDismiss,
                 colors = ButtonDefaults.buttonColors(containerColor = VistaraPrimary),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
@@ -278,10 +365,10 @@ fun VolumeSheet(
                     .height(48.dp)
                     .testTag("apply_volume_button")
             ) {
-                Text("Apply Volume", fontWeight = FontWeight.Bold, color = Color.White)
+                Text("Done", fontWeight = FontWeight.Bold, color = Color.White)
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }
@@ -293,10 +380,12 @@ fun TransformSheet(
     onApplyTransform: (ClipTransform) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var rotation by remember { mutableStateOf(initialTransform.rotationDegrees) }
-    var flipH by remember { mutableStateOf(initialTransform.flipHorizontal) }
-    var flipV by remember { mutableStateOf(initialTransform.flipVertical) }
-    var scale by remember { mutableFloatStateOf(initialTransform.scale) }
+    var transform by remember { mutableStateOf(initialTransform) }
+
+    fun updateAndNotify(newTransform: ClipTransform) {
+        transform = newTransform
+        onApplyTransform(newTransform)
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -316,87 +405,106 @@ fun TransformSheet(
                 fontWeight = FontWeight.Bold
             )
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
+            // Action Buttons: Rotate 90, Flip H, Flip V
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Rotate 90 deg
                 Button(
-                    onClick = { rotation = (rotation + 90) % 360 },
+                    onClick = {
+                        val nextRotation = (transform.rotationDegrees + 90) % 360
+                        updateAndNotify(transform.copy(rotationDegrees = nextRotation))
+                    },
                     colors = ButtonDefaults.buttonColors(containerColor = VistaraDarkSurfaceHighlight),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.weight(1f)
                 ) {
                     Icon(imageVector = Icons.Default.RotateRight, contentDescription = null, tint = VistaraSecondary)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(text = "Rotate (${rotation}°)", color = VistaraTextPrimary, fontSize = 12.sp)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(text = "${transform.rotationDegrees}°", color = VistaraTextPrimary, fontSize = 12.sp)
                 }
 
-                // Flip Horizontal
                 Button(
-                    onClick = { flipH = !flipH },
+                    onClick = {
+                        updateAndNotify(transform.copy(flipHorizontal = !transform.flipHorizontal))
+                    },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (flipH) VistaraSecondary.copy(alpha = 0.3f) else VistaraDarkSurfaceHighlight
+                        containerColor = if (transform.flipHorizontal) VistaraSecondary.copy(alpha = 0.3f) else VistaraDarkSurfaceHighlight
                     ),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    Icon(imageVector = Icons.Default.Flip, contentDescription = null, tint = if (flipH) VistaraSecondary else Color.White)
-                    Spacer(modifier = Modifier.width(6.dp))
+                    Icon(imageVector = Icons.Default.Flip, contentDescription = null, tint = if (transform.flipHorizontal) VistaraSecondary else Color.White)
+                    Spacer(modifier = Modifier.width(4.dp))
                     Text(text = "Flip H", color = VistaraTextPrimary, fontSize = 12.sp)
                 }
 
-                // Flip Vertical
                 Button(
-                    onClick = { flipV = !flipV },
+                    onClick = {
+                        updateAndNotify(transform.copy(flipVertical = !transform.flipVertical))
+                    },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (flipV) VistaraSecondary.copy(alpha = 0.3f) else VistaraDarkSurfaceHighlight
+                        containerColor = if (transform.flipVertical) VistaraSecondary.copy(alpha = 0.3f) else VistaraDarkSurfaceHighlight
                     ),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    Icon(imageVector = Icons.Default.Flip, contentDescription = null, tint = if (flipV) VistaraSecondary else Color.White)
-                    Spacer(modifier = Modifier.width(6.dp))
+                    Icon(imageVector = Icons.Default.Flip, contentDescription = null, tint = if (transform.flipVertical) VistaraSecondary else Color.White)
+                    Spacer(modifier = Modifier.width(4.dp))
                     Text(text = "Flip V", color = VistaraTextPrimary, fontSize = 12.sp)
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
+            // Scale / Zoom Slider (Live immediate preview update)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(text = "Zoom / Scale", color = VistaraTextSecondary, fontSize = 14.sp)
-                Text(text = "${String.format("%.2f", scale)}x", color = VistaraSecondary, fontWeight = FontWeight.Bold)
-            }
-
-            Slider(
-                value = scale,
-                onValueChange = { scale = it },
-                valueRange = 0.5f..2.5f,
-                colors = SliderDefaults.colors(
-                    thumbColor = VistaraSecondary,
-                    activeTrackColor = VistaraSecondary
+                Text(text = "Scale", color = VistaraTextSecondary, fontSize = 13.sp)
+                Text(
+                    text = "${String.format(Locale.US, "%.2f", transform.scale)}x",
+                    color = VistaraSecondary,
+                    fontWeight = FontWeight.Bold
                 )
+            }
+            Slider(
+                value = transform.scale,
+                onValueChange = {
+                    updateAndNotify(transform.copy(scale = it))
+                },
+                valueRange = 0.25f..3.0f,
+                colors = SliderDefaults.colors(thumbColor = VistaraSecondary, activeTrackColor = VistaraSecondary)
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            // Opacity Slider
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(text = "Opacity", color = VistaraTextSecondary, fontSize = 13.sp)
+                Text(
+                    text = "${(transform.opacity * 100).toInt()}%",
+                    color = VistaraSecondary,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Slider(
+                value = transform.opacity,
+                onValueChange = {
+                    updateAndNotify(transform.copy(opacity = it))
+                },
+                valueRange = 0.1f..1.0f,
+                colors = SliderDefaults.colors(thumbColor = VistaraSecondary, activeTrackColor = VistaraSecondary)
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
 
             Button(
-                onClick = {
-                    onApplyTransform(
-                        initialTransform.copy(
-                            rotationDegrees = rotation,
-                            flipHorizontal = flipH,
-                            flipVertical = flipV,
-                            scale = scale
-                        )
-                    )
-                    onDismiss()
-                },
+                onClick = onDismiss,
                 colors = ButtonDefaults.buttonColors(containerColor = VistaraPrimary),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
@@ -404,10 +512,10 @@ fun TransformSheet(
                     .height(48.dp)
                     .testTag("apply_transform_button")
             ) {
-                Text("Apply Transform", fontWeight = FontWeight.Bold, color = Color.White)
+                Text("Done", fontWeight = FontWeight.Bold, color = Color.White)
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }
@@ -416,9 +524,13 @@ fun TransformSheet(
 @Composable
 fun CanvasSheet(
     currentRatio: CanvasAspectRatio,
+    currentBgHex: String,
     onSelectRatio: (CanvasAspectRatio) -> Unit,
+    onSelectBgColor: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val bgColors = listOf("#000000", "#16161D", "#2A1B4E", "#0A192F", "#334155", "#FFFFFF")
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -431,27 +543,27 @@ fun CanvasSheet(
                 .testTag("canvas_sheet")
         ) {
             Text(
-                text = "Canvas Aspect Ratio",
+                text = "Canvas & Background",
                 color = VistaraTextPrimary,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Text(text = "Aspect Ratio", color = VistaraTextSecondary, fontSize = 13.sp)
+            Spacer(modifier = Modifier.height(8.dp))
 
             CanvasAspectRatio.entries.forEach { ratio ->
                 val isSelected = ratio == currentRatio
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 4.dp)
+                        .padding(vertical = 3.dp)
                         .clip(RoundedCornerShape(10.dp))
                         .background(if (isSelected) VistaraSecondary.copy(alpha = 0.15f) else VistaraDarkSurfaceHighlight)
-                        .clickable {
-                            onSelectRatio(ratio)
-                            onDismiss()
-                        }
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                        .clickable { onSelectRatio(ratio) }
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -460,22 +572,54 @@ fun CanvasSheet(
                             text = ratio.label,
                             color = if (isSelected) VistaraSecondary else VistaraTextPrimary,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp
+                            fontSize = 14.sp
                         )
-                        Text(
-                            text = ratio.description,
-                            color = VistaraTextSecondary,
-                            fontSize = 12.sp
-                        )
+                        Text(text = ratio.description, color = VistaraTextMuted, fontSize = 11.sp)
                     }
-
                     if (isSelected) {
                         Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = VistaraSecondary)
                     }
                 }
             }
 
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Canvas Background Color
+            Text(text = "Canvas Background Color", color = VistaraTextSecondary, fontSize = 13.sp)
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                bgColors.forEach { hex ->
+                    val color = Color(android.graphics.Color.parseColor(hex))
+                    val isSelected = currentBgHex.equals(hex, ignoreCase = true)
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(color)
+                            .border(
+                                width = if (isSelected) 3.dp else 1.dp,
+                                color = if (isSelected) VistaraSecondary else Color.Gray,
+                                shape = CircleShape
+                            )
+                            .clickable { onSelectBgColor(hex) }
+                    )
+                }
+            }
+
             Spacer(modifier = Modifier.height(20.dp))
+
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = VistaraPrimary),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+            ) {
+                Text("Done", fontWeight = FontWeight.Bold, color = Color.White)
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }
@@ -484,14 +628,10 @@ fun CanvasSheet(
 @Composable
 fun TextLayerSheet(
     initialProperties: TextLayerProperties? = null,
-    onApply: (text: String, colorHex: String, bgHex: String?, fontSize: Float) -> Unit,
+    onApply: (TextLayerProperties) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var text by remember { mutableStateOf(initialProperties?.text ?: "My Title") }
-    var fontSize by remember { mutableFloatStateOf(initialProperties?.fontSizeSp ?: 24f) }
-    var selectedColor by remember { mutableStateOf(initialProperties?.colorHex ?: "#FFFFFF") }
-    var hasBackground by remember { mutableStateOf(initialProperties?.backgroundColorHex != null) }
-
+    var props by remember { mutableStateOf(initialProperties ?: TextLayerProperties()) }
     val colors = listOf("#FFFFFF", "#F59E0B", "#38BDF8", "#8B5CF6", "#10B981", "#EF4444", "#000000")
 
     ModalBottomSheet(
@@ -503,20 +643,25 @@ fun TextLayerSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp, vertical = 8.dp)
+                .verticalScroll(rememberScrollState())
                 .testTag("text_layer_sheet")
         ) {
             Text(
-                text = "Text Layer",
+                text = "Text Styling & Typography",
                 color = VistaraTextPrimary,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
             OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
+                value = props.text,
+                onValueChange = {
+                    val updated = props.copy(text = it)
+                    props = updated
+                    onApply(updated)
+                },
                 label = { Text("Enter text") },
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = VistaraSecondary,
@@ -530,27 +675,91 @@ fun TextLayerSheet(
                     .testTag("text_input_field")
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
-            Text(text = "Font Size (${fontSize.toInt()}sp)", color = VistaraTextSecondary, fontSize = 13.sp)
+            // Font Selection Row (Sans, Serif, Mono, Handwritten, Bold, Light)
+            Text(text = "Font Family", color = VistaraTextSecondary, fontSize = 13.sp)
+            Spacer(modifier = Modifier.height(6.dp))
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(EditorFont.entries) { font ->
+                    val isSelected = props.fontFamily.equals(font.fontId, ignoreCase = true)
+                    Surface(
+                        onClick = {
+                            val updated = props.copy(fontFamily = font.fontId)
+                            props = updated
+                            onApply(updated)
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (isSelected) VistaraSecondary else VistaraDarkSurfaceHighlight,
+                        modifier = Modifier.height(34.dp)
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier.padding(horizontal = 12.dp)
+                        ) {
+                            Text(
+                                text = font.displayName,
+                                color = if (isSelected) Color.Black else VistaraTextPrimary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Font Size Slider
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(text = "Font Size", color = VistaraTextSecondary, fontSize = 13.sp)
+                Text(text = "${props.fontSizeSp.toInt()}sp", color = VistaraSecondary, fontWeight = FontWeight.Bold)
+            }
             Slider(
-                value = fontSize,
-                onValueChange = { fontSize = it },
-                valueRange = 14f..48f,
+                value = props.fontSizeSp,
+                onValueChange = {
+                    val updated = props.copy(fontSizeSp = it)
+                    props = updated
+                    onApply(updated)
+                },
+                valueRange = 14f..64f,
                 colors = SliderDefaults.colors(thumbColor = VistaraSecondary, activeTrackColor = VistaraSecondary)
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
+            // Opacity Slider
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(text = "Text Opacity", color = VistaraTextSecondary, fontSize = 13.sp)
+                Text(text = "${(props.opacity * 100).toInt()}%", color = VistaraSecondary, fontWeight = FontWeight.Bold)
+            }
+            Slider(
+                value = props.opacity,
+                onValueChange = {
+                    val updated = props.copy(opacity = it)
+                    props = updated
+                    onApply(updated)
+                },
+                valueRange = 0.1f..1.0f,
+                colors = SliderDefaults.colors(thumbColor = VistaraSecondary, activeTrackColor = VistaraSecondary)
+            )
 
-            Text(text = "Color Palette", color = VistaraTextSecondary, fontSize = 13.sp)
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Color Palette
+            Text(text = "Text Color", color = VistaraTextSecondary, fontSize = 13.sp)
+            Spacer(modifier = Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 colors.forEach { hex ->
                     val color = Color(android.graphics.Color.parseColor(hex))
-                    val isSelected = selectedColor.equals(hex, ignoreCase = true)
+                    val isSelected = props.colorHex.equals(hex, ignoreCase = true)
                     Box(
                         modifier = Modifier
-                            .size(36.dp)
+                            .size(34.dp)
                             .clip(CircleShape)
                             .background(color)
                             .border(
@@ -558,34 +767,57 @@ fun TextLayerSheet(
                                 color = if (isSelected) VistaraSecondary else Color.Gray,
                                 shape = CircleShape
                             )
-                            .clickable { selectedColor = hex }
+                            .clickable {
+                                val updated = props.copy(colorHex = hex)
+                                props = updated
+                                onApply(updated)
+                            }
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Background & Shadow Toggles
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(text = "Dark Background Box", color = VistaraTextPrimary, fontSize = 14.sp)
+                Switch(
+                    checked = props.backgroundColorHex != null,
+                    onCheckedChange = { checked ->
+                        val bg = if (checked) "#99000000" else null
+                        val updated = props.copy(backgroundColorHex = bg)
+                        props = updated
+                        onApply(updated)
+                    },
+                    colors = SwitchDefaults.colors(checkedThumbColor = VistaraSecondary)
+                )
+            }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(text = "Add Background Box", color = VistaraTextPrimary, fontSize = 14.sp)
+                Text(text = "Drop Shadow", color = VistaraTextPrimary, fontSize = 14.sp)
                 Switch(
-                    checked = hasBackground,
-                    onCheckedChange = { hasBackground = it },
+                    checked = props.hasShadow,
+                    onCheckedChange = { checked ->
+                        val updated = props.copy(hasShadow = checked)
+                        props = updated
+                        onApply(updated)
+                    },
                     colors = SwitchDefaults.colors(checkedThumbColor = VistaraSecondary)
                 )
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
             Button(
-                onClick = {
-                    val bgHex = if (hasBackground) "#99000000" else null
-                    onApply(text, selectedColor, bgHex, fontSize)
-                    onDismiss()
-                },
+                onClick = onDismiss,
                 colors = ButtonDefaults.buttonColors(containerColor = VistaraPrimary),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
@@ -593,10 +825,10 @@ fun TextLayerSheet(
                     .height(48.dp)
                     .testTag("apply_text_button")
             ) {
-                Text("Save Text", fontWeight = FontWeight.Bold, color = Color.White)
+                Text("Done", fontWeight = FontWeight.Bold, color = Color.White)
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }
@@ -620,6 +852,7 @@ fun TransitionSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp, vertical = 8.dp)
+                .verticalScroll(rememberScrollState())
                 .testTag("transition_sheet")
         ) {
             Text(
@@ -629,18 +862,21 @@ fun TransitionSheet(
                 fontWeight = FontWeight.Bold
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
             TransitionType.entries.forEach { type ->
                 val isSelected = type == selectedType
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 4.dp)
+                        .padding(vertical = 3.dp)
                         .clip(RoundedCornerShape(10.dp))
                         .background(if (isSelected) VistaraSecondary.copy(alpha = 0.2f) else VistaraDarkSurfaceHighlight)
-                        .clickable { selectedType = type }
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                        .clickable {
+                            selectedType = type
+                            onApply(initialTransition.copy(type = type, durationMs = durationMs.toLong()))
+                        }
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -648,7 +884,7 @@ fun TransitionSheet(
                         text = type.label,
                         color = if (isSelected) VistaraSecondary else VistaraTextPrimary,
                         fontWeight = FontWeight.SemiBold,
-                        fontSize = 15.sp
+                        fontSize = 14.sp
                     )
                     if (isSelected) {
                         Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = VistaraSecondary)
@@ -657,30 +893,34 @@ fun TransitionSheet(
             }
 
             if (selectedType != TransitionType.NONE) {
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(text = "Transition Duration", color = VistaraTextSecondary, fontSize = 13.sp)
-                    Text(text = "${(durationMs / 1000f)}s", color = VistaraSecondary, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = "${String.format(Locale.US, "%.1f", durationMs / 1000f)}s",
+                        color = VistaraSecondary,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
 
                 Slider(
                     value = durationMs,
-                    onValueChange = { durationMs = it },
-                    valueRange = 200f..1500f,
+                    onValueChange = {
+                        durationMs = it
+                        onApply(initialTransition.copy(type = selectedType, durationMs = it.toLong()))
+                    },
+                    valueRange = 200f..2000f,
                     colors = SliderDefaults.colors(thumbColor = VistaraSecondary, activeTrackColor = VistaraSecondary)
                 )
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
             Button(
-                onClick = {
-                    onApply(TransitionConfig(type = selectedType, durationMs = durationMs.toLong()))
-                    onDismiss()
-                },
+                onClick = onDismiss,
                 colors = ButtonDefaults.buttonColors(containerColor = VistaraPrimary),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
@@ -688,7 +928,107 @@ fun TransitionSheet(
                     .height(48.dp)
                     .testTag("apply_transition_button")
             ) {
-                Text("Apply Transition", fontWeight = FontWeight.Bold, color = Color.White)
+                Text("Done", fontWeight = FontWeight.Bold, color = Color.White)
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AddMediaChoiceSheet(
+    onSelectMainVideo: () -> Unit,
+    onSelectOverlay: () -> Unit,
+    onSelectAudio: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = VistaraDarkSurface
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 8.dp)
+                .testTag("add_media_choice_sheet")
+        ) {
+            Text(
+                text = "Add Media to Timeline",
+                color = VistaraTextPrimary,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Option 1: Main Video Track
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(VistaraDarkSurfaceHighlight)
+                    .clickable {
+                        onDismiss()
+                        onSelectMainVideo()
+                    }
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(imageVector = Icons.Default.Movie, contentDescription = null, tint = VistaraSecondary, modifier = Modifier.size(28.dp))
+                Spacer(modifier = Modifier.width(16.dp))
+                Column {
+                    Text(text = "Add to Main Video Track", color = VistaraTextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Text(text = "Appends clips sequentially to Video 1", color = VistaraTextMuted, fontSize = 12.sp)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Option 2: Add as Overlay
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(VistaraDarkSurfaceHighlight)
+                    .clickable {
+                        onDismiss()
+                        onSelectOverlay()
+                    }
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(imageVector = Icons.Default.Layers, contentDescription = null, tint = VistaraPrimary, modifier = Modifier.size(28.dp))
+                Spacer(modifier = Modifier.width(16.dp))
+                Column {
+                    Text(text = "Add as Overlay Layer", color = VistaraTextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Text(text = "Places image or video over existing timeline at playhead", color = VistaraTextMuted, fontSize = 12.sp)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Option 3: Add Audio Track
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(VistaraDarkSurfaceHighlight)
+                    .clickable {
+                        onDismiss()
+                        onSelectAudio()
+                    }
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(imageVector = Icons.Default.Audiotrack, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(28.dp))
+                Spacer(modifier = Modifier.width(16.dp))
+                Column {
+                    Text(text = "Add Audio / Music Track", color = VistaraTextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Text(text = "Places music or audio clip onto Audio track", color = VistaraTextMuted, fontSize = 12.sp)
+                }
             }
 
             Spacer(modifier = Modifier.height(20.dp))

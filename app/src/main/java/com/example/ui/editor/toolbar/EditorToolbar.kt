@@ -1,7 +1,5 @@
 package com.example.ui.editor.toolbar
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -22,9 +20,11 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.CropRotate
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Transform
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
@@ -36,18 +36,21 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.domain.model.ItemType
+import com.example.domain.model.TimelineItem
 import com.example.ui.theme.VistaraDarkSurface
-import com.example.ui.theme.VistaraDarkSurfaceHighlight
+import com.example.ui.theme.VistaraPrimary
 import com.example.ui.theme.VistaraSecondary
 import com.example.ui.theme.VistaraTextPrimary
 import com.example.ui.theme.VistaraTextSecondary
 
 @Composable
 fun EditorToolbar(
+    selectedItem: TimelineItem?,
     canSplit: Boolean,
-    hasSelectedItem: Boolean,
     onSplit: () -> Unit,
     onDelete: () -> Unit,
     onDuplicate: () -> Unit,
@@ -73,65 +76,132 @@ fun EditorToolbar(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(scrollState)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Split Action
-            ToolbarToolItem(
-                icon = Icons.Default.ContentCut,
-                label = "Split",
-                enabled = canSplit,
-                onClick = onSplit,
-                testTag = "toolbar_split"
-            )
+            when (selectedItem?.type) {
+                ItemType.TEXT -> {
+                    // Contextual Text Tools
+                    ToolbarToolItem(
+                        icon = Icons.Default.Edit,
+                        label = "Edit Text",
+                        enabled = true,
+                        highlight = true,
+                        onClick = onOpenText,
+                        testTag = "toolbar_text_edit"
+                    )
+                    ToolbarToolItem(
+                        icon = Icons.Default.CropRotate,
+                        label = "Transform",
+                        enabled = true,
+                        onClick = onOpenTransform,
+                        testTag = "toolbar_transform"
+                    )
+                    ToolbarToolItem(
+                        icon = Icons.Default.ContentCopy,
+                        label = "Duplicate",
+                        enabled = true,
+                        onClick = onDuplicate,
+                        testTag = "toolbar_duplicate"
+                    )
+                    ToolbarToolItem(
+                        icon = Icons.Default.Delete,
+                        label = "Delete",
+                        enabled = true,
+                        onClick = onDelete,
+                        testTag = "toolbar_delete"
+                    )
+                }
 
-            // Delete Action
-            ToolbarToolItem(
-                icon = Icons.Default.Delete,
-                label = "Delete",
-                enabled = hasSelectedItem,
-                onClick = onDelete,
-                testTag = "toolbar_delete"
-            )
+                ItemType.IMAGE -> {
+                    // Contextual Overlay Tools
+                    ToolbarToolItem(
+                        icon = Icons.Default.CropRotate,
+                        label = "Transform",
+                        enabled = true,
+                        highlight = true,
+                        onClick = onOpenTransform,
+                        testTag = "toolbar_transform"
+                    )
+                    ToolbarToolItem(
+                        icon = Icons.Default.ContentCopy,
+                        label = "Duplicate",
+                        enabled = true,
+                        onClick = onDuplicate,
+                        testTag = "toolbar_duplicate"
+                    )
+                    ToolbarToolItem(
+                        icon = Icons.Default.Delete,
+                        label = "Delete",
+                        enabled = true,
+                        onClick = onDelete,
+                        testTag = "toolbar_delete"
+                    )
+                }
 
-            // Duplicate Action
-            ToolbarToolItem(
-                icon = Icons.Default.ContentCopy,
-                label = "Duplicate",
-                enabled = hasSelectedItem,
-                onClick = onDuplicate,
-                testTag = "toolbar_duplicate"
-            )
+                else -> {
+                    // Video Clip or Default Tools
+                    ToolbarToolItem(
+                        icon = Icons.Default.ContentCut,
+                        label = "Split",
+                        enabled = canSplit,
+                        highlight = canSplit,
+                        onClick = onSplit,
+                        testTag = "toolbar_split"
+                    )
 
-            // Speed Action
-            ToolbarToolItem(
-                icon = Icons.Default.Speed,
-                label = "Speed",
-                enabled = hasSelectedItem,
-                onClick = onOpenSpeed,
-                testTag = "toolbar_speed"
-            )
+                    ToolbarToolItem(
+                        icon = Icons.Default.Speed,
+                        label = "Speed",
+                        enabled = selectedItem != null,
+                        onClick = onOpenSpeed,
+                        testTag = "toolbar_speed"
+                    )
 
-            // Volume Action
-            ToolbarToolItem(
-                icon = Icons.Default.VolumeUp,
-                label = "Volume",
-                enabled = hasSelectedItem,
-                onClick = onOpenVolume,
-                testTag = "toolbar_volume"
-            )
+                    ToolbarToolItem(
+                        icon = Icons.Default.VolumeUp,
+                        label = "Volume",
+                        enabled = selectedItem != null,
+                        onClick = onOpenVolume,
+                        testTag = "toolbar_volume"
+                    )
 
-            // Crop / Transform
-            ToolbarToolItem(
-                icon = Icons.Default.CropRotate,
-                label = "Transform",
-                enabled = hasSelectedItem,
-                onClick = onOpenTransform,
-                testTag = "toolbar_transform"
-            )
+                    ToolbarToolItem(
+                        icon = Icons.Default.CropRotate,
+                        label = "Transform",
+                        enabled = selectedItem != null,
+                        onClick = onOpenTransform,
+                        testTag = "toolbar_transform"
+                    )
 
-            // Canvas Aspect Ratio
+                    ToolbarToolItem(
+                        icon = Icons.Default.Transform,
+                        label = "Transition",
+                        enabled = selectedItem != null,
+                        onClick = onOpenTransition,
+                        testTag = "toolbar_transition"
+                    )
+
+                    ToolbarToolItem(
+                        icon = Icons.Default.ContentCopy,
+                        label = "Duplicate",
+                        enabled = selectedItem != null,
+                        onClick = onDuplicate,
+                        testTag = "toolbar_duplicate"
+                    )
+
+                    ToolbarToolItem(
+                        icon = Icons.Default.Delete,
+                        label = "Delete",
+                        enabled = selectedItem != null,
+                        onClick = onDelete,
+                        testTag = "toolbar_delete"
+                    )
+                }
+            }
+
+            // Universal Tools (Canvas, Text, Overlay, Add Media)
             ToolbarToolItem(
                 icon = Icons.Default.AspectRatio,
                 label = "Canvas",
@@ -140,38 +210,27 @@ fun EditorToolbar(
                 testTag = "toolbar_canvas"
             )
 
-            // Text Layer
             ToolbarToolItem(
                 icon = Icons.Default.TextFields,
-                label = "Text",
+                label = "+ Text",
                 enabled = true,
                 onClick = onOpenText,
                 testTag = "toolbar_text"
             )
 
-            // Image Overlay
             ToolbarToolItem(
                 icon = Icons.Default.AddPhotoAlternate,
-                label = "Overlay",
+                label = "+ Overlay",
                 enabled = true,
                 onClick = onOpenOverlay,
                 testTag = "toolbar_overlay"
             )
 
-            // Transition
-            ToolbarToolItem(
-                icon = Icons.Default.Transform,
-                label = "Transition",
-                enabled = hasSelectedItem,
-                onClick = onOpenTransition,
-                testTag = "toolbar_transition"
-            )
-
-            // Add Media to Timeline
             ToolbarToolItem(
                 icon = Icons.Default.AddCircleOutline,
                 label = "Add Media",
                 enabled = true,
+                highlight = true,
                 onClick = onAddMedia,
                 testTag = "toolbar_add_media"
             )
@@ -184,35 +243,44 @@ private fun ToolbarToolItem(
     icon: ImageVector,
     label: String,
     enabled: Boolean,
+    highlight: Boolean = false,
     onClick: () -> Unit,
     testTag: String
 ) {
-    val contentAlpha = if (enabled) 1f else 0.35f
-    val tintColor = if (enabled) VistaraTextPrimary else VistaraTextSecondary.copy(alpha = 0.4f)
+    val tintColor = when {
+        !enabled -> VistaraTextSecondary.copy(alpha = 0.35f)
+        highlight -> VistaraSecondary
+        else -> VistaraTextPrimary
+    }
 
-    Column(
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        shape = RoundedCornerShape(8.dp),
+        color = Color.Transparent,
         modifier = Modifier
-            .width(64.dp)
-            .height(58.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .clickable(enabled = enabled, onClick = onClick)
+            .width(62.dp)
+            .height(56.dp)
             .testTag(testTag)
-            .padding(vertical = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = label,
-            tint = tintColor,
-            modifier = Modifier.size(24.dp)
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = label,
-            color = tintColor,
-            fontSize = 11.sp,
-            maxLines = 1
-        )
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = tintColor,
+                modifier = Modifier.size(22.dp)
+            )
+            Spacer(modifier = Modifier.height(3.dp))
+            Text(
+                text = label,
+                color = tintColor,
+                fontSize = 10.sp,
+                fontWeight = if (highlight) FontWeight.Bold else FontWeight.Normal,
+                maxLines = 1
+            )
+        }
     }
 }

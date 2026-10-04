@@ -1,5 +1,7 @@
 package com.example.domain.model
 
+import java.util.UUID
+
 enum class ItemType {
     VIDEO,
     AUDIO,
@@ -10,12 +12,19 @@ enum class ItemType {
 enum class TransitionType(val label: String) {
     NONE("None"),
     FADE("Fade to Black"),
-    CROSS_DISSOLVE("Cross Dissolve")
+    CROSS_DISSOLVE("Cross Dissolve"),
+    SLIDE_LEFT("Slide Left"),
+    SLIDE_RIGHT("Slide Right"),
+    ZOOM("Zoom"),
+    WIPE("Wipe")
 }
 
 data class TransitionConfig(
+    val id: String = UUID.randomUUID().toString(),
     val type: TransitionType = TransitionType.NONE,
-    val durationMs: Long = 500L
+    val durationMs: Long = 500L,
+    val fromClipId: String = "",
+    val toClipId: String = ""
 )
 
 data class ClipTransform(
@@ -28,14 +37,34 @@ data class ClipTransform(
     val cropLeft: Float = 0.0f,
     val cropTop: Float = 0.0f,
     val cropRight: Float = 0.0f,
-    val cropBottom: Float = 0.0f
+    val cropBottom: Float = 0.0f,
+    val opacity: Float = 1.0f
 )
+
+enum class EditorFont(val displayName: String, val fontId: String) {
+    SANS("Sans", "sans"),
+    SERIF("Serif", "serif"),
+    MONO("Mono", "mono"),
+    CURSIVE("Handwritten", "cursive"),
+    BOLD("Heavy", "bold"),
+    LIGHT("Clean Light", "light");
+
+    companion object {
+        fun fromId(id: String?): EditorFont {
+            return entries.firstOrNull { it.fontId.equals(id, ignoreCase = true) || it.displayName.equals(id, ignoreCase = true) } ?: SANS
+        }
+    }
+}
 
 data class TextLayerProperties(
     val text: String = "Title",
+    val fontFamily: String = "sans",
     val fontSizeSp: Float = 24f,
     val colorHex: String = "#FFFFFF",
     val backgroundColorHex: String? = null,
+    val strokeColorHex: String? = null,
+    val strokeWidth: Float = 0f,
+    val hasShadow: Boolean = false,
     val alignment: String = "CENTER", // "LEFT", "CENTER", "RIGHT"
     val positionX: Float = 0.5f, // Normalized 0..1
     val positionY: Float = 0.5f, // Normalized 0..1
@@ -56,6 +85,7 @@ data class TimelineItem(
     val id: String,
     val trackId: String,
     val assetId: String = "",
+    val name: String = "",
     val type: ItemType = ItemType.VIDEO,
     val timelineStartMs: Long = 0L,
     val durationMs: Long = 3000L,

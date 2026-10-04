@@ -10,6 +10,8 @@ data class ProjectEntity(
     val createdAt: Long,
     val updatedAt: Long,
     val canvasRatio: String,
+    val canvasBackgroundColorHex: String = "#000000",
+    val isSnapEnabled: Boolean = true,
     val exportResolution: String,
     val exportFps: Int,
     val exportQuality: String

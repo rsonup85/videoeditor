@@ -58,10 +58,8 @@ import com.example.ui.theme.VistaraDarkSurfaceHighlight
 import com.example.ui.theme.VistaraPrimary
 import com.example.ui.theme.VistaraSecondary
 import com.example.ui.theme.VistaraSuccess
-import com.example.ui.theme.VistaraTextMuted
 import com.example.ui.theme.VistaraTextPrimary
 import com.example.ui.theme.VistaraTextSecondary
-import java.io.File
 
 @Composable
 fun ExportConfigDialog(
@@ -71,6 +69,7 @@ fun ExportConfigDialog(
 ) {
     var resolution by remember { mutableStateOf(initialSettings.resolution) }
     var quality by remember { mutableStateOf(initialSettings.quality) }
+    var fps by remember { mutableStateOf(initialSettings.fps) }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -102,7 +101,7 @@ fun ExportConfigDialog(
                     fontWeight = FontWeight.Bold
                 )
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
                 // Resolution Selection
                 Text(
@@ -111,7 +110,7 @@ fun ExportConfigDialog(
                     fontSize = 13.sp,
                     modifier = Modifier.align(Alignment.Start)
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -125,7 +124,7 @@ fun ExportConfigDialog(
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(if (isSelected) VistaraSecondary.copy(alpha = 0.2f) else VistaraDarkSurfaceHighlight)
                                 .clickable { resolution = res }
-                                .padding(vertical = 12.dp),
+                                .padding(vertical = 10.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
@@ -138,7 +137,43 @@ fun ExportConfigDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Frame Rate (FPS)
+                Text(
+                    text = "Frame Rate",
+                    color = VistaraTextSecondary,
+                    fontSize = 13.sp,
+                    modifier = Modifier.align(Alignment.Start)
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(24, 30, 60).forEach { rate ->
+                        val isSelected = rate == fps
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (isSelected) VistaraSecondary.copy(alpha = 0.2f) else VistaraDarkSurfaceHighlight)
+                                .clickable { fps = rate }
+                                .padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "${rate}fps",
+                                color = if (isSelected) VistaraSecondary else VistaraTextPrimary,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
 
                 // Quality Selection
                 Text(
@@ -147,13 +182,13 @@ fun ExportConfigDialog(
                     fontSize = 13.sp,
                     modifier = Modifier.align(Alignment.Start)
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    listOf(ExportQuality.MEDIUM, ExportQuality.HIGH).forEach { q ->
+                    listOf(ExportQuality.LOW, ExportQuality.MEDIUM, ExportQuality.HIGH).forEach { q ->
                         val isSelected = q == quality
                         Box(
                             modifier = Modifier
@@ -161,7 +196,7 @@ fun ExportConfigDialog(
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(if (isSelected) VistaraSecondary.copy(alpha = 0.2f) else VistaraDarkSurfaceHighlight)
                                 .clickable { quality = q }
-                                .padding(vertical = 12.dp),
+                                .padding(vertical = 10.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
@@ -174,7 +209,7 @@ fun ExportConfigDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(20.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -185,20 +220,26 @@ fun ExportConfigDialog(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .weight(1f)
-                            .height(48.dp)
+                            .height(46.dp)
                     ) {
                         Text("Cancel", color = VistaraTextSecondary)
                     }
 
                     Button(
                         onClick = {
-                            onStartExport(ExportSettings(resolution = resolution, quality = quality))
+                            onStartExport(
+                                ExportSettings(
+                                    resolution = resolution,
+                                    fps = fps,
+                                    quality = quality
+                                )
+                            )
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = VistaraPrimary),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .weight(1f)
-                            .height(48.dp)
+                            .height(46.dp)
                             .testTag("start_export_button")
                     ) {
                         Text("Export Now", fontWeight = FontWeight.Bold, color = Color.White)
@@ -249,9 +290,10 @@ fun ExportStatusDialog(
                         Spacer(modifier = Modifier.height(8.dp))
 
                         Text(
-                            text = "Processing clip ${exportState.currentClipIndex} of ${exportState.totalClips}",
+                            text = exportState.statusMessage,
                             color = VistaraTextSecondary,
-                            fontSize = 13.sp
+                            fontSize = 13.sp,
+                            textAlign = TextAlign.Center
                         )
 
                         Spacer(modifier = Modifier.height(20.dp))
@@ -300,19 +342,28 @@ fun ExportStatusDialog(
                         Spacer(modifier = Modifier.height(12.dp))
 
                         Text(
-                            text = "Export Complete!",
+                            text = "Export Complete",
                             color = VistaraTextPrimary,
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold
                         )
 
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        Text(
+                            text = "Video saved to Gallery",
+                            color = VistaraSuccess,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+
                         Spacer(modifier = Modifier.height(6.dp))
 
-                        val fileSizeMb = String.format("%.1f", exportState.file.length() / (1024f * 1024f))
                         Text(
-                            text = "Duration: ${TimeUtils.formatDurationHuman(exportState.durationMs)} • $fileSizeMb MB",
+                            text = "Location: Movies/Vistara Edit • ${TimeUtils.formatDurationHuman(exportState.durationMs)}",
                             color = VistaraTextSecondary,
-                            fontSize = 13.sp
+                            fontSize = 12.sp,
+                            textAlign = TextAlign.Center
                         )
 
                         Spacer(modifier = Modifier.height(24.dp))
@@ -323,7 +374,7 @@ fun ExportStatusDialog(
                         ) {
                             // Open Video
                             Button(
-                                onClick = { openVideoFile(context, exportState.file) },
+                                onClick = { openVideoUri(context, exportState.mediaStoreUri) },
                                 colors = ButtonDefaults.buttonColors(containerColor = VistaraDarkSurfaceHighlight),
                                 shape = RoundedCornerShape(10.dp),
                                 modifier = Modifier
@@ -331,14 +382,19 @@ fun ExportStatusDialog(
                                     .height(44.dp)
                                     .testTag("open_video_button")
                             ) {
-                                Icon(imageVector = Icons.Default.OpenInNew, contentDescription = null, tint = VistaraSecondary, modifier = Modifier.size(16.dp))
+                                Icon(
+                                    imageVector = Icons.Default.OpenInNew,
+                                    contentDescription = null,
+                                    tint = VistaraSecondary,
+                                    modifier = Modifier.size(16.dp)
+                                )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text("Open", color = VistaraTextPrimary, fontSize = 13.sp)
                             }
 
                             // Share Video
                             Button(
-                                onClick = { shareVideoFile(context, exportState.file) },
+                                onClick = { shareVideoUri(context, exportState.mediaStoreUri) },
                                 colors = ButtonDefaults.buttonColors(containerColor = VistaraPrimary),
                                 shape = RoundedCornerShape(10.dp),
                                 modifier = Modifier
@@ -346,7 +402,12 @@ fun ExportStatusDialog(
                                     .height(44.dp)
                                     .testTag("share_video_button")
                             ) {
-                                Icon(imageVector = Icons.Default.Share, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                Icon(
+                                    imageVector = Icons.Default.Share,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text("Share", color = Color.White, fontSize = 13.sp)
                             }
@@ -411,9 +472,8 @@ fun ExportStatusDialog(
     }
 }
 
-private fun openVideoFile(context: Context, file: File) {
+private fun openVideoUri(context: Context, uri: Uri) {
     try {
-        val uri = FileUtils.getShareableUri(context, file)
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, "video/mp4")
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -425,9 +485,8 @@ private fun openVideoFile(context: Context, file: File) {
     }
 }
 
-private fun shareVideoFile(context: Context, file: File) {
+private fun shareVideoUri(context: Context, uri: Uri) {
     try {
-        val uri = FileUtils.getShareableUri(context, file)
         val shareIntent = Intent(Intent.ACTION_SEND).apply {
             type = "video/mp4"
             putExtra(Intent.EXTRA_STREAM, uri)

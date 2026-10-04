@@ -35,7 +35,6 @@ class ProjectRepository(private val database: AppDatabase) {
     fun getAllProjects(): Flow<List<Project>> {
         return projectDao.getAllProjects().map { entities ->
             entities.map { entity ->
-                // For list view, we provide the project shell; assets and items are loaded on demand or for active project
                 entity.toDomain()
             }
         }
@@ -49,12 +48,13 @@ class ProjectRepository(private val database: AppDatabase) {
         val assets = assetEntities.map { it.toDomain() }
         val items = itemEntities.map { it.toDomain() }
 
-        // Derive default tracks if needed
         val tracks = listOf(
-            Track(id = "track_overlay", type = TrackType.OVERLAY, name = "Overlay", order = 0),
-            Track(id = "track_text", type = TrackType.TEXT, name = "Text", order = 1),
-            Track(id = "track_main_video", type = TrackType.VIDEO, name = "Main Video", order = 2),
-            Track(id = "track_audio", type = TrackType.AUDIO, name = "Audio", order = 3)
+            Track(id = "track_text", type = TrackType.TEXT, name = "TEXT", order = 0),
+            Track(id = "track_image", type = TrackType.OVERLAY, name = "IMAGE", order = 1),
+            Track(id = "track_video_2", type = TrackType.VIDEO, name = "VIDEO 2", order = 2),
+            Track(id = "track_video_1", type = TrackType.VIDEO, name = "VIDEO 1", order = 3),
+            Track(id = "track_audio_1", type = TrackType.AUDIO, name = "AUDIO 1", order = 4),
+            Track(id = "track_audio_2", type = TrackType.AUDIO, name = "AUDIO 2", order = 5)
         )
 
         projectEntity.toDomain(assets = assets, items = items, tracks = tracks)
@@ -116,6 +116,8 @@ class ProjectRepository(private val database: AppDatabase) {
             createdAt = createdAt,
             updatedAt = updatedAt,
             canvasRatio = CanvasAspectRatio.fromName(canvasRatio),
+            canvasBackgroundColorHex = canvasBackgroundColorHex,
+            isSnapEnabled = isSnapEnabled,
             exportSettings = ExportSettings(
                 resolution = runCatching { ExportResolution.valueOf(exportResolution) }.getOrDefault(ExportResolution.RES_1080P),
                 fps = exportFps,
@@ -134,6 +136,8 @@ class ProjectRepository(private val database: AppDatabase) {
             createdAt = createdAt,
             updatedAt = updatedAt,
             canvasRatio = canvasRatio.name,
+            canvasBackgroundColorHex = canvasBackgroundColorHex,
+            isSnapEnabled = isSnapEnabled,
             exportResolution = exportSettings.resolution.name,
             exportFps = exportSettings.fps,
             exportQuality = exportSettings.quality.name
@@ -176,9 +180,13 @@ class ProjectRepository(private val database: AppDatabase) {
         val textProps = if (parsedType == ItemType.TEXT) {
             TextLayerProperties(
                 text = text ?: "Text",
+                fontFamily = textFontFamily ?: "sans",
                 fontSizeSp = textFontSizeSp ?: 24f,
                 colorHex = textColorHex ?: "#FFFFFF",
                 backgroundColorHex = textBackgroundColorHex,
+                strokeColorHex = textStrokeColorHex,
+                strokeWidth = textStrokeWidth ?: 0f,
+                hasShadow = textHasShadow ?: false,
                 alignment = textAlignment ?: "CENTER",
                 positionX = textPositionX ?: 0.5f,
                 positionY = textPositionY ?: 0.5f,
@@ -202,6 +210,7 @@ class ProjectRepository(private val database: AppDatabase) {
             id = id,
             trackId = trackId,
             assetId = assetId,
+            name = name,
             type = parsedType,
             timelineStartMs = timelineStartMs,
             durationMs = durationMs,
@@ -222,11 +231,14 @@ class ProjectRepository(private val database: AppDatabase) {
                 cropLeft = cropLeft,
                 cropTop = cropTop,
                 cropRight = cropRight,
-                cropBottom = cropBottom
+                cropBottom = cropBottom,
+                opacity = opacity
             ),
             transition = TransitionConfig(
                 type = runCatching { TransitionType.valueOf(transitionType) }.getOrDefault(TransitionType.NONE),
-                durationMs = transitionDurationMs
+                durationMs = transitionDurationMs,
+                fromClipId = fromClipId,
+                toClipId = toClipId
             ),
             textProperties = textProps,
             imageProperties = imageProps
@@ -239,6 +251,7 @@ class ProjectRepository(private val database: AppDatabase) {
             projectId = projectId,
             trackId = trackId,
             assetId = assetId,
+            name = name,
             type = type.name,
             timelineStartMs = timelineStartMs,
             durationMs = durationMs,
@@ -259,12 +272,19 @@ class ProjectRepository(private val database: AppDatabase) {
             cropTop = transform.cropTop,
             cropRight = transform.cropRight,
             cropBottom = transform.cropBottom,
+            opacity = transform.opacity,
             transitionType = transition.type.name,
             transitionDurationMs = transition.durationMs,
+            fromClipId = transition.fromClipId,
+            toClipId = transition.toClipId,
             text = textProperties?.text,
+            textFontFamily = textProperties?.fontFamily,
             textFontSizeSp = textProperties?.fontSizeSp,
             textColorHex = textProperties?.colorHex,
             textBackgroundColorHex = textProperties?.backgroundColorHex,
+            textStrokeColorHex = textProperties?.strokeColorHex,
+            textStrokeWidth = textProperties?.strokeWidth,
+            textHasShadow = textProperties?.hasShadow,
             textAlignment = textProperties?.alignment,
             textPositionX = textProperties?.positionX,
             textPositionY = textProperties?.positionY,

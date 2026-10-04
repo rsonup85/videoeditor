@@ -6,7 +6,6 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
-import com.example.domain.model.ItemType
 import com.example.domain.model.Project
 import com.example.domain.model.TimelineItem
 import kotlinx.coroutines.CoroutineScope
@@ -33,6 +32,9 @@ class TimelinePlayer(
     private val _playheadMs = MutableStateFlow(0L)
     val playheadMs: StateFlow<Long> = _playheadMs.asStateFlow()
 
+    private val _isScrubbing = MutableStateFlow(false)
+    val isScrubbing: StateFlow<Boolean> = _isScrubbing.asStateFlow()
+
     private var currentProject: Project? = null
     private var currentLoadedAssetId: String? = null
     private var tickerJob: Job? = null
@@ -42,9 +44,9 @@ class TimelinePlayer(
             override fun onIsPlayingChanged(playing: Boolean) {
                 _isPlaying.value = playing
                 if (playing) {
-                    startTicker()
+                    startPlaybackTicker()
                 } else {
-                    stopTicker()
+                    stopPlaybackTicker()
                 }
             }
 
@@ -58,12 +60,11 @@ class TimelinePlayer(
 
     fun setProject(project: Project) {
         this.currentProject = project
-        // Verify current playhead is within bounds
         val maxDuration = project.totalDurationMs
         if (_playheadMs.value > maxDuration) {
             seekTo(maxDuration)
         } else {
-            syncPlayerToPlayhead(loadMediaIfDifferent = false)
+            syncPlayerToCurrentPlayhead(forceReload = false)
         }
     }
 
@@ -74,13 +75,13 @@ class TimelinePlayer(
         if (_playheadMs.value >= project.totalDurationMs && project.totalDurationMs > 0) {
             seekTo(0L)
         }
-        syncPlayerToPlayhead(loadMediaIfDifferent = true)
+        syncPlayerToCurrentPlayhead(forceReload = true)
         exoPlayer.play()
     }
 
     fun pause() {
         exoPlayer.pause()
-        stopTicker()
+        stopPlaybackTicker()
     }
 
     fun togglePlayPause() {
@@ -91,18 +92,41 @@ class TimelinePlayer(
         }
     }
 
+    fun startScrubbing() {
+        _isScrubbing.value = true
+        if (_isPlaying.value) {
+            pause()
+        }
+    }
+
+    fun stopScrubbing() {
+        _isScrubbing.value = false
+    }
+
+    /**
+     * Authoritative seek method called by playhead drag, ruler clicks, or transport controls.
+     */
     fun seekTo(timelineMs: Long) {
         val project = currentProject ?: return
         val clampedTime = timelineMs.coerceIn(0L, project.totalDurationMs.coerceAtLeast(0L))
         _playheadMs.value = clampedTime
-        syncPlayerToPlayhead(loadMediaIfDifferent = true)
+        syncPlayerToCurrentPlayhead(forceReload = false)
     }
 
-    private fun syncPlayerToPlayhead(loadMediaIfDifferent: Boolean) {
+    fun jumpToStart() {
+        seekTo(0L)
+    }
+
+    fun jumpToEnd() {
+        val project = currentProject ?: return
+        seekTo(project.totalDurationMs)
+    }
+
+    private fun syncPlayerToCurrentPlayhead(forceReload: Boolean) {
         val project = currentProject ?: return
         val currentPlayhead = _playheadMs.value
 
-        // Find active video clip at playhead
+        // Locate active clip at this timeline millisecond
         val activeClip = project.videoClips.find { clip ->
             currentPlayhead >= clip.timelineStartMs && currentPlayhead < (clip.timelineStartMs + clip.durationMs)
         } ?: project.videoClips.lastOrNull()
@@ -113,7 +137,9 @@ class TimelinePlayer(
         val relativeOffsetMs = (currentPlayhead - activeClip.timelineStartMs).coerceAtLeast(0L)
         val sourceMediaSeekMs = activeClip.sourceStartMs + (relativeOffsetMs * activeClip.speed).toLong()
 
-        if (currentLoadedAssetId != asset.id) {
+        val needsNewMedia = currentLoadedAssetId != asset.id || forceReload
+
+        if (needsNewMedia) {
             currentLoadedAssetId = asset.id
             val mediaItem = MediaItem.fromUri(Uri.parse(asset.uriString))
             exoPlayer.setMediaItem(mediaItem)
@@ -125,42 +151,46 @@ class TimelinePlayer(
         exoPlayer.seekTo(sourceMediaSeekMs.coerceAtLeast(0L))
     }
 
-    private fun startTicker() {
+    private fun startPlaybackTicker() {
         tickerJob?.cancel()
         tickerJob = scope.launch(Dispatchers.Main) {
-            var lastTime = System.currentTimeMillis()
             while (isActive && _isPlaying.value) {
-                val now = System.currentTimeMillis()
-                val delta = now - lastTime
-                lastTime = now
-
                 val project = currentProject
-                if (project != null) {
-                    val newPlayhead = _playheadMs.value + delta
-                    if (newPlayhead >= project.totalDurationMs) {
-                        _playheadMs.value = project.totalDurationMs
-                        pause()
-                        seekTo(0L) // Reset to start
-                        break
-                    } else {
-                        _playheadMs.value = newPlayhead
+                if (project != null && project.videoClips.isNotEmpty()) {
+                    val currentPlayhead = _playheadMs.value
+                    val activeClip = project.videoClips.find { clip ->
+                        currentPlayhead >= clip.timelineStartMs && currentPlayhead < (clip.timelineStartMs + clip.durationMs)
+                    }
 
-                        // Check if we stepped into a new clip
-                        val activeClip = project.videoClips.find { clip ->
-                            newPlayhead >= clip.timelineStartMs && newPlayhead < (clip.timelineStartMs + clip.durationMs)
-                        }
-                        if (activeClip != null && activeClip.assetId != currentLoadedAssetId) {
-                            syncPlayerToPlayhead(loadMediaIfDifferent = true)
-                            exoPlayer.play()
+                    if (activeClip != null) {
+                        val playerPos = exoPlayer.currentPosition
+                        val relativeSourceMs = (playerPos - activeClip.sourceStartMs).coerceAtLeast(0L)
+                        val timelineDerivedMs = activeClip.timelineStartMs + (relativeSourceMs / activeClip.speed).toLong()
+
+                        if (timelineDerivedMs >= (activeClip.timelineStartMs + activeClip.durationMs)) {
+                            // Clip finished playing, transition to next clip
+                            val nextClip = project.videoClips.find { it.timelineStartMs >= (activeClip.timelineStartMs + activeClip.durationMs) }
+                            if (nextClip != null) {
+                                _playheadMs.value = nextClip.timelineStartMs
+                                syncPlayerToCurrentPlayhead(forceReload = true)
+                                exoPlayer.play()
+                            } else {
+                                _playheadMs.value = project.totalDurationMs
+                                pause()
+                                seekTo(0L)
+                                break
+                            }
+                        } else {
+                            _playheadMs.value = timelineDerivedMs.coerceIn(0L, project.totalDurationMs)
                         }
                     }
                 }
-                delay(30) // ~33fps playhead update tick
+                delay(20) // ~50fps smooth playhead synchronization
             }
         }
     }
 
-    private fun stopTicker() {
+    private fun stopPlaybackTicker() {
         tickerJob?.cancel()
         tickerJob = null
     }
@@ -178,7 +208,7 @@ class TimelinePlayer(
     }
 
     fun release() {
-        stopTicker()
+        stopPlaybackTicker()
         exoPlayer.release()
     }
 }

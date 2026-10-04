@@ -1,15 +1,30 @@
 package com.example.editor.export
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color as AndroidColor
+import android.graphics.Paint
+import android.graphics.Rect
+import android.graphics.RectF
+import android.graphics.Typeface
 import android.media.MediaCodec
+import android.media.MediaCodecInfo
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.net.Uri
 import com.example.common.FileUtils
+import com.example.domain.model.CanvasAspectRatio
+import com.example.domain.model.ClipTransform
+import com.example.domain.model.ExportQuality
+import com.example.domain.model.ExportResolution
+import com.example.domain.model.ExportSettings
 import com.example.domain.model.ItemType
 import com.example.domain.model.Project
 import com.example.domain.model.TimelineItem
+import com.example.domain.model.TransitionType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,8 +37,17 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 sealed class ExportState {
     object Idle : ExportState()
-    data class Exporting(val progress: Float, val currentClipIndex: Int, val totalClips: Int) : ExportState()
-    data class Success(val file: File, val durationMs: Long) : ExportState()
+    data class Exporting(
+        val progress: Float,
+        val currentClipIndex: Int,
+        val totalClips: Int,
+        val statusMessage: String = "Processing video…"
+    ) : ExportState()
+    data class Success(
+        val mediaStoreUri: Uri,
+        val localFile: File,
+        val durationMs: Long
+    ) : ExportState()
     data class Error(val message: String) : ExportState()
 }
 
@@ -38,31 +62,31 @@ class VideoExporter(private val context: Context) {
         isCancelled.set(true)
     }
 
-    suspend fun exportProject(project: Project): File? = withContext(Dispatchers.IO) {
-        val videoClips = project.items.filter { it.type == ItemType.VIDEO }.sortedBy { it.timelineStartMs }
+    suspend fun exportProject(project: Project): Uri? = withContext(Dispatchers.IO) {
+        val videoClips = project.videoClips
         if (videoClips.isEmpty()) {
             _exportState.value = ExportState.Error("Project contains no video clips to export.")
             return@withContext null
         }
 
         isCancelled.set(false)
-        _exportState.value = ExportState.Exporting(0f, 0, videoClips.size)
+        _exportState.value = ExportState.Exporting(0.01f, 0, videoClips.size, "Preparing export pipeline…")
 
-        val outputFile = FileUtils.createExportFile(context, project.name)
+        val tempOutputFile = FileUtils.createTempExportFile(context, project.name)
         var muxer: MediaMuxer? = null
         var isMuxerStarted = false
 
         try {
             val totalProjectDurationUs = (project.totalDurationMs.coerceAtLeast(1000L)) * 1000L
-            muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            muxer = MediaMuxer(tempOutputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
 
             var muxerVideoTrackIndex = -1
             var muxerAudioTrackIndex = -1
 
-            // Analyze first clip format to set up muxer tracks
+            // Configure muxer tracks from the primary clip format
             val firstClip = videoClips.first()
             val firstAsset = project.assets.find { it.id == firstClip.assetId }
-                ?: return@withContext reportError("Missing media asset for clip ${firstClip.id}", outputFile)
+                ?: return@withContext reportError("Missing media asset for clip ${firstClip.id}", tempOutputFile)
 
             val headerExtractor = MediaExtractor()
             try {
@@ -81,7 +105,7 @@ class VideoExporter(private val context: Context) {
             }
 
             if (muxerVideoTrackIndex == -1) {
-                return@withContext reportError("No compatible video track found in source media.", outputFile)
+                return@withContext reportError("No compatible video track found in source media.", tempOutputFile)
             }
 
             muxer.start()
@@ -89,7 +113,7 @@ class VideoExporter(private val context: Context) {
 
             var videoPtsOffsetUs = 0L
             var audioPtsOffsetUs = 0L
-            val bufferSize = 1024 * 1024 // 1MB buffer
+            val bufferSize = 2 * 1024 * 1024 // 2MB buffer for high-bitrate video samples
             val buffer = ByteBuffer.allocateDirect(bufferSize)
             val bufferInfo = MediaCodec.BufferInfo()
 
@@ -97,6 +121,13 @@ class VideoExporter(private val context: Context) {
 
             for ((clipIndex, clip) in videoClips.withIndex()) {
                 if (isCancelled.get()) throw CancellationException("Export was cancelled by user.")
+
+                _exportState.value = ExportState.Exporting(
+                    progress = (processedDurationUs.toFloat() / totalProjectDurationUs.toFloat()).coerceIn(0.05f, 0.90f),
+                    currentClipIndex = clipIndex + 1,
+                    totalClips = videoClips.size,
+                    statusMessage = "Exporting clip ${clipIndex + 1} of ${videoClips.size}…"
+                )
 
                 val asset = project.assets.find { it.id == clip.assetId } ?: continue
                 val extractor = MediaExtractor()
@@ -144,8 +175,7 @@ class VideoExporter(private val context: Context) {
 
                                 if (sampleTimeUs <= clipSourceEndUs) {
                                     val relativeTimeUs = sampleTimeUs - firstSampleTimeUs
-                                    // Scale timestamp by clip speed
-                                    val speedAdjustedRelativeTimeUs = (relativeTimeUs / clip.speed).toLong()
+                                    val speedAdjustedRelativeTimeUs = (relativeTimeUs / clip.speed.coerceAtLeast(0.1f)).toLong()
                                     val outputPtsUs = videoPtsOffsetUs + speedAdjustedRelativeTimeUs
 
                                     bufferInfo.offset = 0
@@ -159,12 +189,11 @@ class VideoExporter(private val context: Context) {
                                     break
                                 }
                             }
-
                             extractor.advance()
                         }
 
                         extractor.unselectTrack(sourceVideoTrack)
-                        videoPtsOffsetUs = lastWrittenPtsUs + 33_333L // ~30fps step
+                        videoPtsOffsetUs = lastWrittenPtsUs + 33_333L // ~30fps frame increment
                     }
 
                     // --- Process Audio Track for this clip (if not muted) ---
@@ -190,7 +219,7 @@ class VideoExporter(private val context: Context) {
 
                                 if (sampleTimeUs <= clipSourceEndUs) {
                                     val relativeTimeUs = sampleTimeUs - firstAudioSampleUs
-                                    val speedAdjustedRelativeUs = (relativeTimeUs / clip.speed).toLong()
+                                    val speedAdjustedRelativeUs = (relativeTimeUs / clip.speed.coerceAtLeast(0.1f)).toLong()
                                     val outputPtsUs = audioPtsOffsetUs + speedAdjustedRelativeUs
 
                                     bufferInfo.offset = 0
@@ -204,12 +233,11 @@ class VideoExporter(private val context: Context) {
                                     break
                                 }
                             }
-
                             extractor.advance()
                         }
 
                         extractor.unselectTrack(sourceAudioTrack)
-                        audioPtsOffsetUs = lastWrittenAudioPtsUs + 23_000L // audio frame step
+                        audioPtsOffsetUs = lastWrittenAudioPtsUs + 23_000L
                     }
 
                 } finally {
@@ -217,40 +245,54 @@ class VideoExporter(private val context: Context) {
                 }
 
                 processedDurationUs += (clip.durationMs * 1000L)
-                val currentProgress = (processedDurationUs.toFloat() / totalProjectDurationUs.toFloat())
-                    .coerceIn(0.05f, 0.98f)
-                _exportState.value = ExportState.Exporting(
-                    progress = currentProgress,
-                    currentClipIndex = clipIndex + 1,
-                    totalClips = videoClips.size
-                )
             }
 
             if (isCancelled.get()) {
                 throw CancellationException("Export was cancelled.")
             }
 
+            // Finish and close muxer
             muxer.stop()
             isMuxerStarted = false
             muxer.release()
             muxer = null
 
+            _exportState.value = ExportState.Exporting(
+                progress = 0.95f,
+                currentClipIndex = videoClips.size,
+                totalClips = videoClips.size,
+                statusMessage = "Saving video to Gallery…"
+            )
+
+            // Save to modern Android MediaStore (Movies/Vistara Edit)
+            val mediaStoreUri = FileUtils.saveVideoToGallery(context, tempOutputFile, project.name)
+            if (mediaStoreUri == null) {
+                return@withContext reportError(
+                    "Video processing finished, but failed to save to Android Gallery. Please check device storage permissions.",
+                    tempOutputFile
+                )
+            }
+
             _exportState.value = ExportState.Success(
-                file = outputFile,
+                mediaStoreUri = mediaStoreUri,
+                localFile = tempOutputFile,
                 durationMs = project.totalDurationMs
             )
-            outputFile
+
+            mediaStoreUri
 
         } catch (e: CancellationException) {
-            outputFile.delete()
+            tempOutputFile.delete()
             _exportState.value = ExportState.Idle
             null
         } catch (e: Exception) {
             e.printStackTrace()
-            outputFile.delete()
+            tempOutputFile.delete()
             val userMsg = when {
-                e.message?.contains("ENOSPC", true) == true -> "Export failed: device storage is full. Please free up space."
-                e.message?.contains("codec", true) == true -> "Export failed: unsupported video codec in imported media."
+                e.message?.contains("ENOSPC", true) == true ->
+                    "Export failed because the device ran out of available storage space."
+                e.message?.contains("codec", true) == true ->
+                    "Export failed due to an incompatible video codec in the imported media."
                 else -> "Export encountered an error: ${e.localizedMessage ?: "Unknown media processing error"}"
             }
             _exportState.value = ExportState.Error(userMsg)
@@ -263,8 +305,8 @@ class VideoExporter(private val context: Context) {
         }
     }
 
-    private fun reportError(message: String, outputFile: File): File? {
-        outputFile.delete()
+    private fun reportError(message: String, tempFile: File): Uri? {
+        tempFile.delete()
         _exportState.value = ExportState.Error(message)
         return null
     }

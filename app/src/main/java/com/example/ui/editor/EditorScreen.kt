@@ -1,5 +1,6 @@
 package com.example.ui.editor
 
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -14,13 +15,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.domain.model.ClipTransform
@@ -32,6 +34,7 @@ import com.example.editor.viewmodel.EditorViewModel
 import com.example.ui.editor.export.ExportConfigDialog
 import com.example.ui.editor.export.ExportStatusDialog
 import com.example.ui.editor.preview.PreviewCanvas
+import com.example.ui.editor.sheets.AddMediaChoiceSheet
 import com.example.ui.editor.sheets.CanvasSheet
 import com.example.ui.editor.sheets.SpeedSheet
 import com.example.ui.editor.sheets.TextLayerSheet
@@ -64,20 +67,22 @@ fun EditorScreen(
     val isFullscreen by viewModel.isFullscreen.collectAsStateWithLifecycle()
     val exportState by viewModel.exportState.collectAsStateWithLifecycle()
 
+    var pendingTargetTrack by remember { mutableStateOf("track_video_1") }
+
     BackHandler {
         onNavigateBack()
     }
 
-    // Media Picker for adding additional clips to the timeline
+    // Media Picker for adding media with track destination
     val mediaAddLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickMultipleVisualMedia()
     ) { uris ->
         if (uris.isNotEmpty()) {
-            viewModel.addMediaClips(uris)
+            viewModel.addMediaClips(uris, targetTrack = pendingTargetTrack)
         }
     }
 
-    // Media Picker for Image Overlay
+    // Single photo picker for Image Overlay
     val overlayPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
@@ -104,8 +109,8 @@ fun EditorScreen(
 
     // Check if playhead is strictly inside the selected video clip for split
     val canSplit = isVideoSelected && selectedItem != null &&
-            playheadMs > (selectedItem.timelineStartMs + 100) &&
-            playheadMs < (selectedItem.timelineStartMs + selectedItem.durationMs - 100)
+            playheadMs > (selectedItem.timelineStartMs + 50) &&
+            playheadMs < (selectedItem.timelineStartMs + selectedItem.durationMs - 50)
 
     Scaffold(
         modifier = Modifier
@@ -141,16 +146,23 @@ fun EditorScreen(
                 playheadMs = playheadMs,
                 isPlaying = isPlaying,
                 isFullscreen = isFullscreen,
+                selectedItemId = selectedItemId,
                 onTogglePlayPause = { viewModel.togglePlayPause() },
                 onToggleFullscreen = { viewModel.toggleFullscreen() },
+                onSeek = { viewModel.seekTo(it) },
+                onJumpToStart = { viewModel.jumpToStart() },
+                onJumpToEnd = { viewModel.jumpToEnd() },
+                onUpdateTextProperties = { id, props -> viewModel.updateTextProperties(id, props) },
+                onUpdateImageProperties = { id, props -> viewModel.updateImageProperties(id, props) },
+                onSelectItem = { viewModel.selectItem(it) },
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(if (isFullscreen) 1f else 1.15f)
             )
 
-            // Timeline & Toolbar (Hidden in fullscreen preview mode)
+            // Timeline & Toolbar (Hidden in fullscreen mode)
             if (!isFullscreen) {
-                // Interactive Timeline
+                // Interactive Multi-Track Timeline
                 TimelineView(
                     project = currentProject,
                     playheadMs = playheadMs,
@@ -160,19 +172,26 @@ fun EditorScreen(
                     onTrimClip = { newStart, newDuration ->
                         viewModel.trimSelectedClip(newStart, newDuration)
                     },
+                    onMoveLayer = { id, newStart ->
+                        viewModel.moveLayer(id, newStart)
+                    },
+                    onTrimLayer = { id, newDuration ->
+                        viewModel.trimLayer(id, newDuration)
+                    },
                     onOpenTransition = {
                         viewModel.selectItem(it)
                         viewModel.openSheet(EditorSheet.TRANSITION)
                     },
+                    onToggleSnap = { viewModel.toggleSnap() },
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1.0f)
                 )
 
-                // Bottom Editing Toolbar
+                // Contextual Bottom Toolbar
                 EditorToolbar(
+                    selectedItem = selectedItem,
                     canSplit = canSplit,
-                    hasSelectedItem = selectedItem != null,
                     onSplit = { viewModel.splitSelectedClip() },
                     onDelete = { viewModel.deleteSelectedItem() },
                     onDuplicate = { viewModel.duplicateSelectedItem() },
@@ -194,11 +213,7 @@ fun EditorScreen(
                         )
                     },
                     onOpenTransition = { viewModel.openSheet(EditorSheet.TRANSITION) },
-                    onAddMedia = {
-                        mediaAddLauncher.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
-                        )
-                    }
+                    onAddMedia = { viewModel.openSheet(EditorSheet.ADD_MEDIA_CHOICE) }
                 )
             }
         }
@@ -236,7 +251,9 @@ fun EditorScreen(
         EditorSheet.CANVAS -> {
             CanvasSheet(
                 currentRatio = currentProject.canvasRatio,
+                currentBgHex = currentProject.canvasBackgroundColorHex,
                 onSelectRatio = { viewModel.setCanvasAspectRatio(it) },
+                onSelectBgColor = { viewModel.setCanvasBackgroundColor(it) },
                 onDismiss = { viewModel.closeSheet() }
             )
         }
@@ -244,16 +261,9 @@ fun EditorScreen(
         EditorSheet.TEXT_EDITOR -> {
             TextLayerSheet(
                 initialProperties = selectedItem?.textProperties,
-                onApply = { text, colorHex, bgHex, fontSize ->
-                    selectedItem?.textProperties?.let {
-                        viewModel.updateTextProperties(
-                            it.copy(
-                                text = text,
-                                colorHex = colorHex,
-                                backgroundColorHex = bgHex,
-                                fontSizeSp = fontSize
-                            )
-                        )
+                onApply = { updatedProps ->
+                    selectedItem?.let {
+                        viewModel.updateTextProperties(it.id, updatedProps)
                     }
                 },
                 onDismiss = { viewModel.closeSheet() }
@@ -264,6 +274,30 @@ fun EditorScreen(
             TransitionSheet(
                 initialTransition = selectedItem?.transition ?: TransitionConfig(),
                 onApply = { viewModel.setClipTransition(it) },
+                onDismiss = { viewModel.closeSheet() }
+            )
+        }
+
+        EditorSheet.ADD_MEDIA_CHOICE -> {
+            AddMediaChoiceSheet(
+                onSelectMainVideo = {
+                    pendingTargetTrack = "track_video_1"
+                    mediaAddLauncher.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+                    )
+                },
+                onSelectOverlay = {
+                    pendingTargetTrack = "track_image"
+                    overlayPickerLauncher.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+                    )
+                },
+                onSelectAudio = {
+                    pendingTargetTrack = "track_audio_1"
+                    mediaAddLauncher.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+                    )
+                },
                 onDismiss = { viewModel.closeSheet() }
             )
         }

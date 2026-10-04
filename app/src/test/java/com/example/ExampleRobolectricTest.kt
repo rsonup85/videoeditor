@@ -8,16 +8,21 @@ import com.example.data.repository.ProjectRepository
 import com.example.domain.model.CanvasAspectRatio
 import com.example.domain.model.ClipTransform
 import com.example.domain.model.ExportSettings
+import com.example.domain.model.ImageLayerProperties
 import com.example.domain.model.ItemType
 import com.example.domain.model.MediaAsset
 import com.example.domain.model.MediaType
 import com.example.domain.model.Project
+import com.example.domain.model.TextLayerProperties
 import com.example.domain.model.TimelineItem
+import com.example.domain.model.TransitionConfig
+import com.example.domain.model.TransitionType
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -70,7 +75,7 @@ class ExampleRobolectricTest {
 
         val item = TimelineItem(
             id = UUID.randomUUID().toString(),
-            trackId = "track_main_video",
+            trackId = "track_video_1",
             assetId = assetId,
             type = ItemType.VIDEO,
             timelineStartMs = 0L,
@@ -100,6 +105,102 @@ class ExampleRobolectricTest {
         assertEquals(1, loaded?.items?.size)
         assertEquals(90, loaded?.items?.first()?.transform?.rotationDegrees)
         assertEquals(6000L, loaded?.totalDurationMs)
+    }
+
+    @Test
+    fun `save and load multi-track project with text, overlays, transitions, and custom speed`() = runBlocking {
+        val projectId = UUID.randomUUID().toString()
+        val videoAssetId = UUID.randomUUID().toString()
+        val imageAssetId = UUID.randomUUID().toString()
+
+        val videoAsset = MediaAsset(
+            id = videoAssetId,
+            uriString = "file:///storage/video.mp4",
+            fileName = "main_video.mp4",
+            mediaType = MediaType.VIDEO,
+            durationMs = 8000L
+        )
+
+        val imageAsset = MediaAsset(
+            id = imageAssetId,
+            uriString = "file:///storage/logo.png",
+            fileName = "logo.png",
+            mediaType = MediaType.IMAGE,
+            durationMs = 3000L
+        )
+
+        val videoClip = TimelineItem(
+            id = "clip_1",
+            trackId = "track_video_1",
+            assetId = videoAssetId,
+            type = ItemType.VIDEO,
+            timelineStartMs = 0L,
+            durationMs = 5000L,
+            sourceStartMs = 1000L,
+            sourceDurationMs = 4000L,
+            speed = 0.8f,
+            transition = TransitionConfig(type = TransitionType.FADE, durationMs = 600L)
+        )
+
+        val textLayer = TimelineItem(
+            id = "text_1",
+            trackId = "track_text",
+            type = ItemType.TEXT,
+            timelineStartMs = 1500L,
+            durationMs = 2500L,
+            textProperties = TextLayerProperties(
+                text = "Cinematic Shot",
+                fontFamily = "serif",
+                colorHex = "#38BDF8",
+                hasShadow = true
+            )
+        )
+
+        val imageOverlay = TimelineItem(
+            id = "overlay_1",
+            trackId = "track_image",
+            assetId = imageAssetId,
+            type = ItemType.IMAGE,
+            timelineStartMs = 1000L,
+            durationMs = 3000L,
+            imageProperties = ImageLayerProperties(
+                scale = 1.25f,
+                opacity = 0.9f
+            )
+        )
+
+        val project = Project(
+            id = projectId,
+            name = "Advanced Multi-Track Project",
+            canvasRatio = CanvasAspectRatio.RATIO_16_9,
+            canvasBackgroundColorHex = "#16161D",
+            isSnapEnabled = true,
+            items = listOf(videoClip, textLayer, imageOverlay),
+            assets = listOf(videoAsset, imageAsset)
+        )
+
+        repository.saveProject(project)
+
+        val loaded = repository.getProject(projectId)
+        assertNotNull(loaded)
+        assertEquals("Advanced Multi-Track Project", loaded?.name)
+        assertEquals("#16161D", loaded?.canvasBackgroundColorHex)
+        assertTrue(loaded?.isSnapEnabled == true)
+        assertEquals(3, loaded?.items?.size)
+
+        val loadedVideo = loaded?.items?.find { it.id == "clip_1" }
+        assertNotNull(loadedVideo)
+        assertEquals(0.8f, loadedVideo?.speed)
+        assertEquals(TransitionType.FADE, loadedVideo?.transition?.type)
+
+        val loadedText = loaded?.items?.find { it.id == "text_1" }
+        assertNotNull(loadedText)
+        assertEquals("Cinematic Shot", loadedText?.textProperties?.text)
+        assertEquals("serif", loadedText?.textProperties?.fontFamily)
+
+        val loadedOverlay = loaded?.items?.find { it.id == "overlay_1" }
+        assertNotNull(loadedOverlay)
+        assertEquals(1.25f, loadedOverlay?.imageProperties?.scale)
     }
 
     @Test

@@ -24,14 +24,12 @@ import com.example.editor.export.VideoExporter
 import com.example.editor.player.TimelinePlayer
 import com.example.editor.undo.UndoRedoManager
 import com.example.media.MediaMetadataReader
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.util.UUID
 
 enum class EditorSheet {
@@ -42,6 +40,7 @@ enum class EditorSheet {
     CANVAS,
     TEXT_EDITOR,
     TRANSITION,
+    ADD_MEDIA_CHOICE,
     EXPORT_CONFIG
 }
 
@@ -85,7 +84,6 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             if (loaded != null) {
                 _project.value = loaded
                 timelinePlayer.setProject(loaded)
-                // Select first clip by default if available
                 _selectedItemId.value = loaded.videoClips.firstOrNull()?.id
                 undoRedoManager.clear()
                 updateUndoRedoStates()
@@ -113,8 +111,22 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         timelinePlayer.seekTo(timeMs)
     }
 
+    fun jumpToStart() {
+        timelinePlayer.jumpToStart()
+    }
+
+    fun jumpToEnd() {
+        timelinePlayer.jumpToEnd()
+    }
+
     fun togglePlayPause() {
         timelinePlayer.togglePlayPause()
+    }
+
+    fun toggleSnap() {
+        mutateProject(recordUndo = false) { proj ->
+            proj.copy(isSnapEnabled = !proj.isSnapEnabled)
+        }
     }
 
     private fun mutateProject(recordUndo: Boolean = true, mutator: (Project) -> Project) {
@@ -156,17 +168,14 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         autosaveJob?.cancel()
         _autosaveStatus.value = "Saving…"
         autosaveJob = viewModelScope.launch {
-            delay(500) // Debounce autosave
+            delay(500)
             repository.saveProject(projectToSave)
             _autosaveStatus.value = "Saved"
         }
     }
 
-    // --- Editing Operations ---
+    // --- Core Timeline Editing Operations ---
 
-    /**
-     * Splits selected video clip at current playhead position into two distinct clips
-     */
     fun splitSelectedClip() {
         val current = _project.value ?: return
         val selectedId = _selectedItemId.value ?: return
@@ -176,27 +185,24 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         val clipStart = clip.timelineStartMs
         val clipEnd = clipStart + clip.durationMs
 
-        // Check if playhead is strictly inside the clip bounds
-        if (currentPlayhead <= clipStart + 100 || currentPlayhead >= clipEnd - 100) return
+        if (currentPlayhead <= clipStart + 50 || currentPlayhead >= clipEnd - 50) return
 
         mutateProject { proj ->
             val splitTimelineOffset = currentPlayhead - clipStart
             val splitSourceOffset = (splitTimelineOffset * clip.speed).toLong()
 
-            // Clip 1 (First half)
             val clip1 = clip.copy(
                 durationMs = splitTimelineOffset,
                 sourceDurationMs = splitSourceOffset
             )
 
-            // Clip 2 (Second half)
             val clip2 = clip.copy(
                 id = UUID.randomUUID().toString(),
                 timelineStartMs = currentPlayhead,
                 durationMs = clip.durationMs - splitTimelineOffset,
                 sourceStartMs = clip.sourceStartMs + splitSourceOffset,
                 sourceDurationMs = clip.sourceDurationMs - splitSourceOffset,
-                transition = TransitionConfig() // Reset transition on split
+                transition = TransitionConfig()
             )
 
             val updatedItems = proj.items.toMutableList()
@@ -211,9 +217,6 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /**
-     * Trims source start or end of the selected clip, recalibrating the sequence
-     */
     fun trimSelectedClip(newSourceStartMs: Long, newSourceDurationMs: Long) {
         val selectedId = _selectedItemId.value ?: return
         mutateProject { proj ->
@@ -233,7 +236,6 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             )
             videoClips[index] = updatedClip
 
-            // Re-sequence subsequent clips sequentially
             var currentTimeline = 0L
             val resequenced = videoClips.map { item ->
                 val shifted = item.copy(timelineStartMs = currentTimeline)
@@ -246,14 +248,34 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /**
-     * Deletes the currently selected timeline item
-     */
+    fun moveLayer(itemId: String, newTimelineStartMs: Long) {
+        mutateProject(recordUndo = false) { proj ->
+            val updated = proj.items.map { item ->
+                if (item.id == itemId) {
+                    item.copy(timelineStartMs = newTimelineStartMs)
+                } else item
+            }
+            proj.copy(items = updated)
+        }
+    }
+
+    fun trimLayer(itemId: String, newDurationMs: Long) {
+        mutateProject(recordUndo = false) { proj ->
+            val updated = proj.items.map { item ->
+                if (item.id == itemId) {
+                    item.copy(durationMs = newDurationMs.coerceAtLeast(500L))
+                } else item
+            }
+            proj.copy(items = updated)
+        }
+    }
+
     fun deleteSelectedItem() {
         val selectedId = _selectedItemId.value ?: return
         mutateProject { proj ->
             val remainingItems = proj.items.filterNot { it.id == selectedId }
-            val videoClips = remainingItems.filter { it.type == ItemType.VIDEO }.sortedBy { it.timelineStartMs }
+            val videoClips = remainingItems.filter { it.type == ItemType.VIDEO && it.trackId == "track_video_1" }
+                .sortedBy { it.timelineStartMs }
             var currentTimeline = 0L
             val resequencedVideo = videoClips.map { item ->
                 val shifted = item.copy(timelineStartMs = currentTimeline)
@@ -261,22 +283,19 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                 shifted
             }
 
-            val otherItems = remainingItems.filter { it.type != ItemType.VIDEO }
+            val otherItems = remainingItems.filterNot { it.type == ItemType.VIDEO && it.trackId == "track_video_1" }
             _selectedItemId.value = resequencedVideo.firstOrNull()?.id ?: otherItems.firstOrNull()?.id
             proj.copy(items = resequencedVideo + otherItems)
         }
     }
 
-    /**
-     * Duplicates the selected item and inserts right after it
-     */
     fun duplicateSelectedItem() {
         val selectedId = _selectedItemId.value ?: return
         mutateProject { proj ->
             val item = proj.items.find { it.id == selectedId } ?: return@mutateProject proj
             val newItem = item.copy(id = UUID.randomUUID().toString())
 
-            if (item.type == ItemType.VIDEO) {
+            if (item.type == ItemType.VIDEO && item.trackId == "track_video_1") {
                 val videoClips = proj.videoClips.toMutableList()
                 val index = videoClips.indexOfFirst { it.id == selectedId }
                 if (index != -1) {
@@ -292,10 +311,9 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                     shifted
                 }
                 _selectedItemId.value = newItem.id
-                val otherItems = proj.items.filter { it.type != ItemType.VIDEO }
+                val otherItems = proj.items.filterNot { it.type == ItemType.VIDEO && it.trackId == "track_video_1" }
                 proj.copy(items = resequenced + otherItems)
             } else {
-                // Overlay or Text duplicate
                 val updated = proj.items.toMutableList()
                 updated.add(newItem.copy(timelineStartMs = item.timelineStartMs + 500L))
                 _selectedItemId.value = newItem.id
@@ -304,32 +322,6 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /**
-     * Reorders video clips (moving clip left or right in sequence)
-     */
-    fun reorderClip(fromIndex: Int, toIndex: Int) {
-        mutateProject { proj ->
-            val videoClips = proj.videoClips.toMutableList()
-            if (fromIndex !in videoClips.indices || toIndex !in videoClips.indices) return@mutateProject proj
-
-            val moved = videoClips.removeAt(fromIndex)
-            videoClips.add(toIndex, moved)
-
-            var currentTimeline = 0L
-            val resequenced = videoClips.map { clip ->
-                val shifted = clip.copy(timelineStartMs = currentTimeline)
-                currentTimeline += shifted.durationMs
-                shifted
-            }
-
-            val otherItems = proj.items.filter { it.type != ItemType.VIDEO }
-            proj.copy(items = resequenced + otherItems)
-        }
-    }
-
-    /**
-     * Adjusts playback speed of selected clip and updates duration
-     */
     fun updateClipSpeed(speed: Float) {
         val selectedId = _selectedItemId.value ?: return
         mutateProject { proj ->
@@ -338,7 +330,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             if (index == -1) return@mutateProject proj
 
             val clip = videoClips[index]
-            val safeSpeed = speed.coerceIn(0.2f, 3.0f)
+            val safeSpeed = speed.coerceIn(0.1f, 10.0f)
             val newDuration = (clip.sourceDurationMs / safeSpeed).toLong()
 
             videoClips[index] = clip.copy(speed = safeSpeed, durationMs = newDuration)
@@ -350,14 +342,11 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                 shifted
             }
 
-            val otherItems = proj.items.filter { it.type != ItemType.VIDEO }
+            val otherItems = proj.items.filterNot { it.type == ItemType.VIDEO && it.trackId == "track_video_1" }
             proj.copy(items = resequenced + otherItems)
         }
     }
 
-    /**
-     * Updates clip audio volume and mute toggle
-     */
     fun updateClipVolume(volume: Float, isMuted: Boolean) {
         val selectedId = _selectedItemId.value ?: return
         mutateProject { proj ->
@@ -370,12 +359,9 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /**
-     * Updates visual transform (rotation, flip, scale, offset, crop)
-     */
     fun updateClipTransform(transform: ClipTransform) {
         val selectedId = _selectedItemId.value ?: return
-        mutateProject { proj ->
+        mutateProject(recordUndo = false) { proj ->
             val updatedItems = proj.items.map { item ->
                 if (item.id == selectedId) {
                     item.copy(transform = transform)
@@ -385,24 +371,25 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /**
-     * Sets Canvas Aspect Ratio (9:16, 16:9, 1:1, 4:5, 3:4, Original)
-     */
     fun setCanvasAspectRatio(ratio: CanvasAspectRatio) {
         mutateProject { proj ->
             proj.copy(canvasRatio = ratio)
         }
     }
 
-    /**
-     * Adds a text layer at current playhead position
-     */
+    fun setCanvasBackgroundColor(hex: String) {
+        mutateProject { proj ->
+            proj.copy(canvasBackgroundColorHex = hex)
+        }
+    }
+
     fun addTextLayer(text: String, colorHex: String, bgHex: String?, fontSize: Float) {
         mutateProject { proj ->
             val currentPlayhead = playheadMs.value
             val newItem = TimelineItem(
                 id = UUID.randomUUID().toString(),
                 trackId = "track_text",
+                name = text,
                 type = ItemType.TEXT,
                 timelineStartMs = currentPlayhead,
                 durationMs = 3000L,
@@ -418,24 +405,17 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /**
-     * Updates text layer properties
-     */
-    fun updateTextProperties(properties: TextLayerProperties) {
-        val selectedId = _selectedItemId.value ?: return
-        mutateProject { proj ->
+    fun updateTextProperties(itemId: String, properties: TextLayerProperties) {
+        mutateProject(recordUndo = false) { proj ->
             val updatedItems = proj.items.map { item ->
-                if (item.id == selectedId && item.type == ItemType.TEXT) {
-                    item.copy(textProperties = properties)
+                if (item.id == itemId && item.type == ItemType.TEXT) {
+                    item.copy(textProperties = properties, name = properties.text)
                 } else item
             }
             proj.copy(items = updatedItems)
         }
     }
 
-    /**
-     * Adds an image overlay at current playhead
-     */
     fun addImageOverlay(rawUri: Uri) {
         viewModelScope.launch {
             val context = getApplication<Application>()
@@ -446,8 +426,9 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                 val currentPlayhead = playheadMs.value
                 val newItem = TimelineItem(
                     id = UUID.randomUUID().toString(),
-                    trackId = "track_overlay",
+                    trackId = "track_image",
                     assetId = asset.id,
+                    name = asset.fileName,
                     type = ItemType.IMAGE,
                     timelineStartMs = currentPlayhead,
                     durationMs = 3000L,
@@ -462,14 +443,10 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /**
-     * Updates image overlay properties
-     */
-    fun updateImageProperties(properties: ImageLayerProperties) {
-        val selectedId = _selectedItemId.value ?: return
-        mutateProject { proj ->
+    fun updateImageProperties(itemId: String, properties: ImageLayerProperties) {
+        mutateProject(recordUndo = false) { proj ->
             val updatedItems = proj.items.map { item ->
-                if (item.id == selectedId && item.type == ItemType.IMAGE) {
+                if (item.id == itemId && item.type == ItemType.IMAGE) {
                     item.copy(imageProperties = properties)
                 } else item
             }
@@ -477,9 +454,6 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /**
-     * Sets transition on selected clip
-     */
     fun setClipTransition(transition: TransitionConfig) {
         val selectedId = _selectedItemId.value ?: return
         mutateProject { proj ->
@@ -492,10 +466,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /**
-     * Imports additional media clips to the current project timeline
-     */
-    fun addMediaClips(uris: List<Uri>) {
+    fun addMediaClips(uris: List<Uri>, targetTrack: String = "track_video_1") {
         if (uris.isEmpty()) return
         viewModelScope.launch {
             val context = getApplication<Application>()
@@ -509,24 +480,39 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             }
 
             mutateProject { proj ->
-                var currentTimeline = proj.totalDurationMs
+                val currentPlayhead = playheadMs.value
+                var currentTimeline = if (targetTrack == "track_video_1") proj.totalDurationMs else currentPlayhead
+
                 for (asset in newAssets) {
+                    val actualTrack = when {
+                        asset.mediaType == MediaType.AUDIO -> "track_audio_1"
+                        targetTrack == "track_image" -> "track_image"
+                        targetTrack == "track_video_2" -> "track_video_2"
+                        else -> "track_video_1"
+                    }
+
+                    val itemType = when (asset.mediaType) {
+                        MediaType.AUDIO -> ItemType.AUDIO
+                        MediaType.IMAGE -> ItemType.IMAGE
+                        MediaType.VIDEO -> ItemType.VIDEO
+                    }
+
                     val item = TimelineItem(
                         id = UUID.randomUUID().toString(),
-                        trackId = if (asset.mediaType == MediaType.AUDIO) "track_audio" else "track_main_video",
+                        trackId = actualTrack,
                         assetId = asset.id,
-                        type = when (asset.mediaType) {
-                            MediaType.AUDIO -> ItemType.AUDIO
-                            MediaType.IMAGE -> ItemType.IMAGE
-                            MediaType.VIDEO -> ItemType.VIDEO
-                        },
+                        name = asset.fileName,
+                        type = itemType,
                         timelineStartMs = currentTimeline,
                         durationMs = asset.durationMs,
                         sourceStartMs = 0L,
-                        sourceDurationMs = asset.durationMs
+                        sourceDurationMs = asset.durationMs,
+                        imageProperties = if (itemType == ItemType.IMAGE) ImageLayerProperties() else null
                     )
                     newItems.add(item)
-                    currentTimeline += asset.durationMs
+                    if (actualTrack == "track_video_1") {
+                        currentTimeline += asset.durationMs
+                    }
                 }
                 proj.copy(
                     assets = proj.assets + newAssets,
@@ -536,7 +522,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    // --- Export ---
+    // --- Export Pipeline ---
 
     fun startExport(settings: ExportSettings) {
         val current = _project.value ?: return

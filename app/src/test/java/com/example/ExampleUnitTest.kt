@@ -3,19 +3,21 @@ package com.example
 import com.example.common.TimeUtils
 import com.example.domain.model.CanvasAspectRatio
 import com.example.domain.model.ClipTransform
+import com.example.domain.model.EditorFont
 import com.example.domain.model.ItemType
 import com.example.domain.model.MediaAsset
 import com.example.domain.model.MediaType
 import com.example.domain.model.Project
+import com.example.domain.model.TextLayerProperties
 import com.example.domain.model.TimelineItem
+import com.example.domain.model.TransitionConfig
+import com.example.domain.model.TransitionType
 import com.example.editor.undo.UndoRedoManager
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.util.UUID
 
 class ExampleUnitTest {
 
@@ -33,7 +35,7 @@ class ExampleUnitTest {
     fun testProjectDurationCalculation() {
         val clip1 = TimelineItem(
             id = "c1",
-            trackId = "track_main_video",
+            trackId = "track_video_1",
             type = ItemType.VIDEO,
             timelineStartMs = 0L,
             durationMs = 5000L,
@@ -42,7 +44,7 @@ class ExampleUnitTest {
         )
         val clip2 = TimelineItem(
             id = "c2",
-            trackId = "track_main_video",
+            trackId = "track_video_1",
             type = ItemType.VIDEO,
             timelineStartMs = 5000L,
             durationMs = 3000L,
@@ -58,6 +60,59 @@ class ExampleUnitTest {
 
         assertEquals(8000L, project.totalDurationMs)
         assertEquals(2, project.videoClips.size)
+    }
+
+    @Test
+    fun testCustomSpeedCalculation() {
+        val sourceDuration = 10000L
+        val customSpeed = 0.83f
+        val calculatedDuration = (sourceDuration / customSpeed).toLong()
+
+        val clip = TimelineItem(
+            id = "speed_clip",
+            trackId = "track_video_1",
+            type = ItemType.VIDEO,
+            sourceStartMs = 0L,
+            sourceDurationMs = sourceDuration,
+            speed = customSpeed,
+            durationMs = calculatedDuration
+        )
+
+        assertEquals(0.83f, clip.speed)
+        assertEquals(12048L, clip.durationMs)
+    }
+
+    @Test
+    fun testTransitionsAndFonts() {
+        val transition = TransitionConfig(
+            type = TransitionType.FADE,
+            durationMs = 800L
+        )
+        assertEquals(TransitionType.FADE, transition.type)
+        assertEquals(800L, transition.durationMs)
+
+        assertEquals(EditorFont.SANS, EditorFont.fromId("sans"))
+        assertEquals(EditorFont.SERIF, EditorFont.fromId("serif"))
+        assertEquals(EditorFont.MONO, EditorFont.fromId("mono"))
+        assertEquals(EditorFont.CURSIVE, EditorFont.fromId("cursive"))
+        assertEquals(EditorFont.BOLD, EditorFont.fromId("bold"))
+    }
+
+    @Test
+    fun testTextLayerProperties() {
+        val textProps = TextLayerProperties(
+            text = "Vistara Cinematic",
+            fontFamily = "serif",
+            fontSizeSp = 32f,
+            colorHex = "#38BDF8",
+            backgroundColorHex = "#99000000",
+            hasShadow = true
+        )
+        assertEquals("Vistara Cinematic", textProps.text)
+        assertEquals("serif", textProps.fontFamily)
+        assertEquals(32f, textProps.fontSizeSp)
+        assertEquals("#38BDF8", textProps.colorHex)
+        assertTrue(textProps.hasShadow)
     }
 
     @Test

@@ -1,0 +1,6 @@
+{
+  "name": "Vistara Edit",
+  "description": "Professional all-in-one mobile video editor featuring non-destructive timeline editing, trimming, splitting, multi-track layers, transitions, audio control, and high-performance export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

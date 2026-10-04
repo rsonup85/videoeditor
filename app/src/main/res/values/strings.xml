@@ -1,0 +1,30 @@
+<resources>
+    <string name="app_name">Vistara Edit</string>
+    <string name="new_project">New Project</string>
+    <string name="my_projects">Projects</string>
+    <string name="recent_projects">Recent Projects</string>
+    <string name="search_projects">Search projects…</string>
+    <string name="no_projects_title">No Projects Yet</string>
+    <string name="no_projects_subtitle">Import videos and photos to start crafting your story</string>
+    <string name="export">Export</string>
+    <string name="exporting">Exporting Video</string>
+    <string name="export_complete">Export Complete</string>
+    <string name="open_video">Open Video</string>
+    <string name="share">Share</string>
+    <string name="done">Done</string>
+    <string name="trim">Trim</string>
+    <string name="split">Split</string>
+    <string name="delete">Delete</string>
+    <string name="duplicate">Duplicate</string>
+    <string name="undo">Undo</string>
+    <string name="redo">Redo</string>
+    <string name="speed">Speed</string>
+    <string name="volume">Volume</string>
+    <string name="crop">Crop</string>
+    <string name="rotate">Rotate</string>
+    <string name="canvas">Canvas</string>
+    <string name="text_layer">Text</string>
+    <string name="overlay_layer">Overlay</string>
+    <string name="audio_layer">Audio</string>
+    <string name="transitions">Transition</string>
+</resources>

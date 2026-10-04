@@ -19,10 +19,15 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
 
+    - name: Create Missing Environment Files
+      run: |
+        touch .env.example
+        touch .env
+
     - name: Setup Gradle
       uses: gradle/actions/setup-gradle@v3
 
-    - name: Grant execute permission for gradlew (if exists)
+    - name: Build APK
       run: |
         if [ -f "./gradlew" ]; then
           chmod +x gradlew
